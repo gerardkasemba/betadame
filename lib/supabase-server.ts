@@ -3,28 +3,14 @@ import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import type { Database } from '@/types/supabase';
 
-// Create and cache the cookie store
-let cookieStore: ReturnType<typeof cookies>;
-
-const getCookieStore = () => {
-  if (!cookieStore) {
-    cookieStore = cookies(); // ✅ no await here
-  }
-  return cookieStore;
-};
-
-// Create supabase client with proper cookie handling
-const createSupabaseClient = () => {
-  const cookieStore = getCookieStore();
-  return createServerComponentClient<Database>({
-    cookies: () => cookieStore,
-  });
+export const createServerSupabaseClient = () => {
+  return createServerComponentClient<Database>({ cookies });
 };
 
 // Helper function to fetch open games
 export const getOpenGames = async () => {
-  const supabase = createSupabaseClient();
-
+  const supabase = createServerSupabaseClient();
+  
   const { data: games, error } = await supabase
     .from('games')
     .select('*')
@@ -35,17 +21,13 @@ export const getOpenGames = async () => {
 };
 
 export const getSession = async () => {
-  const supabase = createSupabaseClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const supabase = createServerSupabaseClient();
+  const { data: { session } } = await supabase.auth.getSession();
   return session;
 };
 
 export const getUser = async () => {
-  const supabase = createSupabaseClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const supabase = createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
   return user;
 };
