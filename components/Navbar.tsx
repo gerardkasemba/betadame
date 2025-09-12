@@ -71,10 +71,11 @@ export function Navbar() {
           <Link href="/" className="text-2xl font-bold text-yellow-500 flex items-center group">
             <div className="relative flex items-center px-4 py-2">
               <Image 
-                src="./logo-betadame-yellow.svg"
+                src="/logo-betadame-yellow.svg"
                 alt="BetaDame"
                 height={100}
                 width={100}
+                priority
               />
             </div>
           </Link>
@@ -165,10 +166,11 @@ export function Navbar() {
             onClick={() => setIsMobileMenuOpen(false)}
           >
             <Image 
-              src="./logo-betadame-yellow.svg"
+              src="/logo-betadame-yellow.svg"
               alt="BetaDame"
-              height={80}
-              width={80}
+              height={100}
+              width={100}
+              priority
             />
           </Link>
 
