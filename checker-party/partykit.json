@@ -1,0 +1,13 @@
+{
+  "$schema": "https://www.partykit.io/schema.json",
+  "name": "checker-party",
+  "main": "./party/server.ts",
+  "compatibilityDate": "2025-09-12",
+  "serve": {
+    "path": "public",
+    "build": "src/client.ts"
+  },
+  "vars": {
+    "NODE_ENV": "development"
+  }
+}

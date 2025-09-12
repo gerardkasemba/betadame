@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --color-congolese-blue: #0072CE; /* DRC flag blue */
+  --color-congolese-red: #CE1126; /* DRC flag red */
+  --color-congolese-yellow: #FFC107; /* DRC flag yellow */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-congolese-blue: var(--color-congolese-blue);
+  --color-congolese-red: var(--color-congolese-red);
+  --color-congolese-yellow: var(--color-congolese-yellow);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+    /* DRC colors remain the same for brand consistency */
+    --color-congolese-blue: #0072CE;
+    --color-congolese-red: #CE1126;
+    --color-congolese-yellow: #FFC107;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.timer {
+  font-size: 1.5em;
+  font-weight: bold;
+}
+
+.timer.low {
+  color: red;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+.piece.red { background-color: red; }
+.piece.black { background-color: black; }
+.piece.king { border: 2px solid gold; }
+.highlight-from { background-color: rgba(255, 255, 0, 0.5); }
+.highlight-to { background-color: rgba(0, 255, 0, 0.5); }
+
+.highlight-from {
+  background-color: rgba(255, 255, 0, 0.5) !important; /* Yellow for 'from' */
+  transition: background-color 0.3s;
+}
+
+.highlight-to {
+  background-color: rgba(0, 255, 0, 0.5) !important; /* Green for 'to' */
+  transition: background-color 0.3s;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  width: 100%;
+  max-width: 600px;
+  aspect-ratio: 1;
+}
+
+.square {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.piece {
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.3s;
+}
+
+.highlight-from {
+  background-color: rgba(255, 255, 0, 0.5) !important; /* Yellow for 'from' */
+  transition: background-color 0.3s;
+}
+
+.highlight-to {
+  background-color: rgba(0, 255, 0, 0.5) !important; /* Green for 'to' */
+  transition: background-color 0.3s;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}

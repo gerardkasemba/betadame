@@ -1,0 +1,45 @@
+{
+  "name": "checker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev:next\" \"npm run dev:party\"",
+    "dev:next": "next dev --turbopack",
+    "dev:party": "partykit dev",
+    "build": "next build --turbopack",
+    "start": "next start",
+    "lint": "eslint",
+    "party": "partykit dev"
+  },
+  "dependencies": {
+    "@supabase/auth-helpers-nextjs": "^0.10.0",
+    "@supabase/ssr": "^0.7.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "next": "15.5.2",
+    "next-pwa": "^5.6.0",
+    "partysocket": "^1.1.5",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-icons": "^5.5.0",
+    "react-toastify": "^11.0.5",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
+    "concurrently": "^8.2.2",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.2",
+    "partykit": "^0.0.115",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  },
+  "partykit": {
+    "name": "checker",
+    "main": "party/server.ts"
+  }
+}
