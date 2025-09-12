@@ -2,7 +2,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSupabase } from '@/lib/supabase-client';
 import PartySocket from 'partysocket';
-import { Game, Board, Piece, Position, Move } from '../types';
+import { Game, Board, Position, Move } from '../types';
 
 const BOARD_SIZE = 8;
 
@@ -213,6 +213,8 @@ export const useCheckersGame = (initialGame?: Game) => {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const computerModeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const computerId = 'a9f80596-2373-4343-bdfa-8b9c0eee84c4';
+
   // Initialize board and timer
   const initializeBoard = useCallback(() => {
     if (!initialGame) return;
@@ -222,7 +224,7 @@ export const useCheckersGame = (initialGame?: Game) => {
     setRedPieces(initialGame.board.filter(p => p === 'wp' || p === 'wk').length);
     setBlackPieces(initialGame.board.filter(p => p === 'bp' || p === 'bk').length);
     setGameStatus(initialGame.status);
-    setIsComputerMode(!!initialGame.player2_id && initialGame.player2_id === 'a9f80596-2373-4343-bdfa-8b9c0eee84c4');
+    setIsComputerMode(!!initialGame.player2_id && initialGame.player2_id === computerId);
     setSelectedPiece(null);
     setValidMoves([]);
     setError(null);
@@ -241,6 +243,12 @@ export const useCheckersGame = (initialGame?: Game) => {
 
   // Update user balance
   const updateUserBalance = useCallback(async (userId: string, amount: number) => {
+    // Skip balance updates for computer
+    if (userId === computerId) {
+      console.log(`Computer balance change skipped: ${amount}`);
+      return;
+    }
+
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('balance')
@@ -273,14 +281,14 @@ export const useCheckersGame = (initialGame?: Game) => {
 
     try {
       const stake = initialGame.stake;
-      const computerId = 'a9f80596-2373-4343-bdfa-8b9c0eee84c4';
 
       if (isComputerMode) {
         if (winnerId === computerId) {
-          await updateUserBalance(computerId, stake * 2);
+          // Computer wins: player loses stake, no gain for computer
+          await updateUserBalance(initialGame.player1_id, -stake);
         } else {
-          await updateUserBalance(computerId, -stake);
-          await updateUserBalance(winnerId, stake * 2);
+          // Player wins: gains stake (computer's stake)
+          await updateUserBalance(initialGame.player1_id, stake);
         }
       } else {
         if (winnerId === initialGame.player1_id) {
@@ -288,11 +296,12 @@ export const useCheckersGame = (initialGame?: Game) => {
         } else if (winnerId === initialGame.player2_id) {
           await updateUserBalance(initialGame.player2_id, stake * 2);
         } else {
+          // Draw
           if (initialGame.player1_id) {
-            await updateUserBalance(initialGame.player1_id, stake);
+            await updateUserBalance(initialGame.player1_id, -initialGame.stake);
           }
           if (initialGame.player2_id) {
-            await updateUserBalance(initialGame.player2_id, stake);
+            await updateUserBalance(initialGame.player2_id, -initialGame.stake);
           }
         }
       }
@@ -300,7 +309,31 @@ export const useCheckersGame = (initialGame?: Game) => {
       console.error('Error handling game completion:', error);
       setError('Erreur lors de la distribution des gains');
     }
-  }, [initialGame, updateUserBalance, isComputerMode]);
+  }, [initialGame, updateUserBalance, isComputerMode, computerId]);
+
+  // Activate computer mode
+  const activateComputerMode = useCallback(() => {
+    if (!initialGame) return;
+    setIsComputerMode(true);
+    setGameStatus('active');
+    setOpponentActivity('Vous jouez contre l\'ordinateur (mode difficile)');
+    
+    supabase
+      .from('games')
+      .update({
+        status: 'active',
+        player2_id: computerId,
+        closes_at: null,
+        stake: initialGame.stake * 2,
+      })
+      .eq('id', initialGame.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error('Error updating game for computer mode:', error.message);
+          setError('Erreur lors de l\'activation du mode ordinateur');
+        }
+      });
+  }, [initialGame, supabase, computerId]);
 
   // Check for computer mode activation
   useEffect(() => {
@@ -311,55 +344,19 @@ export const useCheckersGame = (initialGame?: Game) => {
     const timeSinceCreation = (now - createdAt) / 1000;
 
     if (timeSinceCreation >= 60) {
-      setIsComputerMode(true);
-      setGameStatus('active');
-      setOpponentActivity('Vous jouez contre l\'ordinateur (mode difficile)');
-      supabase
-        .from('games')
-        .update({
-          status: 'active',
-          player2_id: 'a9f80596-2373-4343-bdfa-8b9c0eee84c4',
-          closes_at: null,
-          stake: initialGame.stake * 2,
-        })
-        .eq('id', initialGame.id)
-        .then(({ error }) => {
-          if (error) {
-            console.error('Error updating game for computer mode:', error.message);
-            setError('Erreur lors de l\'activation du mode ordinateur');
-          }
-        });
+      activateComputerMode();
       return;
     }
 
     const remainingTime = 60 - timeSinceCreation;
-    computerModeTimerRef.current = setTimeout(() => {
-      setIsComputerMode(true);
-      setGameStatus('active');
-      setOpponentActivity('Vous jouez contre l\'ordinateur (mode difficile)');
-      supabase
-        .from('games')
-        .update({
-          status: 'active',
-          player2_id: 'a9f80596-2373-4343-bdfa-8b9c0eee84c4',
-          closes_at: null,
-          stake: initialGame.stake * 2,
-        })
-        .eq('id', initialGame.id)
-        .then(({ error }) => {
-          if (error) {
-            console.error('Error updating game for computer mode:', error.message);
-            setError('Erreur lors de l\'activation du mode ordinateur');
-          }
-        });
-    }, remainingTime * 1000);
+    computerModeTimerRef.current = setTimeout(activateComputerMode, remainingTime * 1000);
 
     return () => {
       if (computerModeTimerRef.current) {
         clearTimeout(computerModeTimerRef.current);
       }
     };
-  }, [initialGame, supabase]);
+  }, [initialGame, activateComputerMode]);
 
   // Hard mode AI using minimax with alpha-beta pruning
   const minimax = useCallback(
@@ -473,7 +470,7 @@ export const useCheckersGame = (initialGame?: Game) => {
 
     if (winner) {
       updateData.status = 'finished';
-      updateData.winner_id = 'a9f80596-2373-4343-bdfa-8b9c0eee84c4';
+      updateData.winner_id = computerId;
     }
 
     const { error } = await supabase
@@ -495,7 +492,7 @@ export const useCheckersGame = (initialGame?: Game) => {
           redPieces: newRedPieces,
           blackPieces: newBlackPieces,
           status: winner ? 'finished' : 'active',
-          winner_id: winner ? 'a9f80596-2373-4343-bdfa-8b9c0eee84c4' : null,
+          winner_id: winner ? computerId : null,
           last_move_at: new Date().toISOString(),
           moveDetails: {
             from: move.from,
@@ -510,9 +507,9 @@ export const useCheckersGame = (initialGame?: Game) => {
     if (winner) {
       setGameStatus('finished');
       setTimeLeft(0);
-      handleGameCompletion('a9f80596-2373-4343-bdfa-8b9c0eee84c4');
+      handleGameCompletion(computerId);
     }
-  }, [isComputerMode, initialGame, currentPlayer, gameStatus, board, supabase, handleGameCompletion, minimax]);
+  }, [isComputerMode, initialGame, currentPlayer, gameStatus, board, supabase, handleGameCompletion, minimax, computerId]);
 
   // Trigger computer move
   useEffect(() => {
@@ -630,7 +627,7 @@ export const useCheckersGame = (initialGame?: Game) => {
     }
 
     const winnerId = isComputerMode
-      ? 'a9f80596-2373-4343-bdfa-8b9c0eee84c4'
+      ? computerId
       : (user.id === initialGame.player1_id ? initialGame.player2_id : initialGame.player1_id);
 
     const updateData: Partial<Game> = {
@@ -666,7 +663,7 @@ export const useCheckersGame = (initialGame?: Game) => {
 
     setGameStatus('finished');
     setError('Vous avez abandonné la partie !');
-  }, [initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode]);
+  }, [initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode, computerId]);
 
   // Real-time updates with PartyKit
   useEffect(() => {
@@ -736,7 +733,7 @@ export const useCheckersGame = (initialGame?: Game) => {
           setTimeLeft(0);
           setLastPlayer2Move(null);
           const winnerId = player_id === user.id
-            ? (isComputerMode ? 'a9f80596-2373-4343-bdfa-8b9c0eee84c4' : (user.id === initialGame.player1_id ? initialGame.player2_id : initialGame.player1_id))
+            ? (isComputerMode ? computerId : (user.id === initialGame.player1_id ? initialGame.player2_id : initialGame.player1_id))
             : user.id;
           handleGameCompletion(winnerId);
         }
@@ -750,7 +747,7 @@ export const useCheckersGame = (initialGame?: Game) => {
       socket.close();
       socketRef.current = null;
     };
-  }, [initialGame, supabase, handleGameCompletion, isComputerMode]);
+  }, [initialGame, supabase, handleGameCompletion, isComputerMode, computerId]);
 
   // Handle square click
   const handleSquareClick = useCallback(
@@ -834,7 +831,7 @@ export const useCheckersGame = (initialGame?: Game) => {
             if (winner) {
               updateData.status = 'finished';
               updateData.winner_id = isComputerMode && winner === 'red'
-                ? 'a9f80596-2373-4343-bdfa-8b9c0eee84c4'
+                ? computerId
                 : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id);
             }
 
@@ -859,7 +856,7 @@ export const useCheckersGame = (initialGame?: Game) => {
                   status: winner ? 'finished' : 'active',
                   winner_id: winner
                     ? (isComputerMode && winner === 'red'
-                        ? 'a9f80596-2373-4343-bdfa-8b9c0eee84c4'
+                        ? computerId
                         : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id))
                     : null,
                   player_id: user.id,
@@ -880,7 +877,7 @@ export const useCheckersGame = (initialGame?: Game) => {
               setLastPlayer2Move(null);
               handleGameCompletion(
                 isComputerMode && winner === 'red'
-                  ? 'a9f80596-2373-4343-bdfa-8b9c0eee84c4'
+                  ? computerId
                   : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id)
               );
             }
@@ -906,7 +903,7 @@ export const useCheckersGame = (initialGame?: Game) => {
         }
       }
     },
-    [board, currentPlayer, selectedPiece, validMoves, initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode]
+    [board, currentPlayer, selectedPiece, validMoves, initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode, computerId]
   );
 
   return {

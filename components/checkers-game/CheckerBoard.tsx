@@ -1,4 +1,5 @@
-// components/checkers-game/CheckerBoard.tsx
+"use client";
+import { FaCrown } from 'react-icons/fa'; // For king icon (replaced ♔ for consistency)
 import { Board, Position, Move } from '@/types';
 
 interface CheckerBoardProps {
@@ -6,21 +7,20 @@ interface CheckerBoardProps {
   selectedPiece: Position | null;
   validMoves: Move[];
   onSquareClick: (row: number, col: number) => void;
-  disabled?: boolean;
-  playerRole?: 'black' | 'red' | 'spectator';
-  lastPlayer2Move: { from: Position; to: Position } | null; // Added for player2 move display
+  disabled: boolean;
+  playerRole: 'black' | 'red' | 'spectator';
+  lastPlayer2Move: { from: Position; to: Position } | null;
 }
 
-const CheckerBoard: React.FC<CheckerBoardProps> = ({
+export default function CheckerBoard({
   board,
   selectedPiece,
   validMoves,
   onSquareClick,
-  disabled = false,
-  playerRole = 'spectator',
+  disabled,
+  playerRole,
   lastPlayer2Move,
-}) => {
-  // Flip board for red player (player2)
+}: CheckerBoardProps) {
   const displayBoard = playerRole === 'red' ? [...board].reverse().map(row => [...row].reverse()) : board;
 
   return (
@@ -30,14 +30,12 @@ const CheckerBoard: React.FC<CheckerBoardProps> = ({
     >
       {displayBoard.map((row, rowIndex) =>
         row.map((piece, colIndex) => {
-          // Adjust coordinates for red player's perspective
           const originalRow = playerRole === 'red' ? 7 - rowIndex : rowIndex;
           const originalCol = playerRole === 'red' ? 7 - colIndex : colIndex;
           const isDark = (rowIndex + colIndex) % 2 === 1;
           const isSelected = selectedPiece?.row === originalRow && selectedPiece?.col === originalCol;
           const isValidMove = validMoves.some(move => move.row === originalRow && move.col === originalCol);
           const isJumpMove = validMoves.find(move => move.row === originalRow && move.col === originalCol)?.isJump;
-          // Adjust lastPlayer2Move coordinates for red player
           const isFrom = lastPlayer2Move && 
             (playerRole === 'red'
               ? lastPlayer2Move.from.row === 7 - originalRow && lastPlayer2Move.from.col === 7 - originalCol
@@ -54,8 +52,8 @@ const CheckerBoard: React.FC<CheckerBoardProps> = ({
                 ${isDark ? 'bg-amber-800' : 'bg-amber-200'}
                 ${isSelected ? 'bg-yellow-400 border-2 border-yellow-500' : ''}
                 ${isValidMove ? (isJumpMove ? 'bg-red-300' : 'bg-green-300') : ''}
-                ${isFrom ? 'highlight-from' : ''}
-                ${isTo ? 'highlight-to' : ''}
+                ${isFrom ? 'ring-2 ring-blue-400' : ''}  // Tailwind for highlight-from
+                ${isTo ? 'ring-2 ring-green-400' : ''}    // Tailwind for highlight-to
                 ${disabled || !isDark ? 'cursor-not-allowed' : 'cursor-pointer'}`}
               onClick={() => !disabled && isDark && onSquareClick(originalRow, originalCol)}
             >
@@ -68,9 +66,7 @@ const CheckerBoard: React.FC<CheckerBoardProps> = ({
                     ${!disabled && isDark ? 'hover:scale-105 hover:shadow-lg cursor-pointer' : ''}`}
                 >
                   {piece.isKing && (
-                    <div className="absolute inset-0 flex justify-center items-center text-yellow-300 text-2xl font-bold">
-                      ♔
-                    </div>
+                    <FaCrown className="absolute inset-0 text-yellow-300 text-xs" />
                   )}
                 </div>
               )}
@@ -86,6 +82,4 @@ const CheckerBoard: React.FC<CheckerBoardProps> = ({
       )}
     </div>
   );
-};
-
-export default CheckerBoard;
+}
