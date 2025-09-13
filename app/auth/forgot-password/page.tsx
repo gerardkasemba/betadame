@@ -52,7 +52,7 @@ export default function ForgotPassword() {
 
   return (
     <div className="flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 md:p-8">
+      <div className="w-full max-w-md p-6 md:p-8">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-blue-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -92,7 +92,7 @@ export default function ForgotPassword() {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="votre@email.com"
-                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full text-[#222] pl-10 pr-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
                 disabled={loading}
               />
@@ -116,7 +116,7 @@ export default function ForgotPassword() {
 
           <div className="text-center pt-4">
             <Link 
-              href="/auth/login" 
+              href="/" 
               className="text-blue-600 hover:text-blue-700 font-medium flex items-center justify-center"
             >
               <FiArrowLeft className="mr-2" />

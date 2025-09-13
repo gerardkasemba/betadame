@@ -2,7 +2,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSupabase } from '@/lib/supabase-client';
 import PartySocket from 'partysocket';
-import { Game, Board, Position, Move } from '../types';
+import { Game, Board, Position, Move } from '@/types';
 
 const BOARD_SIZE = 8;
 
@@ -188,13 +188,21 @@ const checkGameOver = (board: Board, currentPlayer: 'red' | 'black'): 'red' | 'b
 
   return hasMoves ? null : currentPlayer;
 };
+// Computer player constants
+const COMPUTER_ID = 'a9f80596-2373-4343-bdfa-8b9c0eee84c4';
+const COMPUTER_EMAIL = 'gerardkasemba@gmail.com';
+const COMPUTER_MOVE_DELAY = 1000; // 1 second for computer moves
+const COMPUTER_JOIN_DELAY = 60000; // 60 seconds before computer joins
 
 export const useCheckersGame = (initialGame?: Game) => {
   const { supabase } = useSupabase();
-  const [board, setBoard] = useState<Board>(
-    initialGame ? supabaseToClientBoard(initialGame.board) : Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null))
+  const [board, setBoard] = useState<Board>(() => 
+    initialGame ? supabaseToClientBoard(initialGame.board) : 
+    Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null))
   );
-  const [currentPlayer, setCurrentPlayer] = useState<'red' | 'black'>(initialGame?.current_player === 'white' ? 'red' : 'black');
+  const [currentPlayer, setCurrentPlayer] = useState<'red' | 'black'>(
+    initialGame?.current_player === 'white' ? 'red' : 'black'
+  );
   const [selectedPiece, setSelectedPiece] = useState<Position | null>(null);
   const [validMoves, setValidMoves] = useState<Move[]>([]);
   const [redPieces, setRedPieces] = useState<number>(
@@ -203,33 +211,68 @@ export const useCheckersGame = (initialGame?: Game) => {
   const [blackPieces, setBlackPieces] = useState<number>(
     initialGame ? initialGame.board.filter(p => p === 'bp' || p === 'bk').length : 12
   );
-  const [gameStatus, setGameStatus] = useState<'open' | 'active' | 'finished' | 'closed'>(initialGame?.status || 'open');
-  const [isComputerMode, setIsComputerMode] = useState<boolean>(false);
+  const [gameStatus, setGameStatus] = useState<'open' | 'active' | 'finished' | 'closed'>(
+    initialGame?.status || 'open'
+  );
+  const [isComputerMode, setIsComputerMode] = useState<boolean>(
+    initialGame ? !!initialGame.player2_id && initialGame.player2_id === COMPUTER_ID : false
+  );
   const [error, setError] = useState<string | null>(null);
   const [opponentActivity, setOpponentActivity] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(30);
   const [lastPlayer2Move, setLastPlayer2Move] = useState<{ from: Position; to: Position } | null>(null);
+  
   const socketRef = useRef<PartySocket | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const computerModeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const computerMoveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const computerId = 'a9f80596-2373-4343-bdfa-8b9c0eee84c4';
+  // Get current user ID with caching
+  const getCurrentUserId = useCallback(async (): Promise<string | null> => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      return user?.id || null;
+    } catch (error) {
+      console.error('Error getting user ID:', error);
+      return null;
+    }
+  }, [supabase]);
 
-  // Initialize board and timer
+  // Check if current user is the active player
+  const isCurrentPlayer = useCallback(async (): Promise<boolean> => {
+    if (!initialGame) return false;
+    
+    const userId = await getCurrentUserId();
+    if (!userId) return false;
+    
+    if (isComputerMode) {
+      return userId === initialGame.player1_id && currentPlayer === 'black';
+    }
+    
+    return (
+      (userId === initialGame.player1_id && currentPlayer === 'black') ||
+      (userId === initialGame.player2_id && currentPlayer === 'red')
+    );
+  }, [initialGame, currentPlayer, isComputerMode, getCurrentUserId]);
+
+  // Initialize or reset the game state
   const initializeBoard = useCallback(() => {
     if (!initialGame) return;
+    
     const newBoard = supabaseToClientBoard(initialGame.board);
     setBoard(newBoard);
     setCurrentPlayer(initialGame.current_player === 'white' ? 'red' : 'black');
     setRedPieces(initialGame.board.filter(p => p === 'wp' || p === 'wk').length);
     setBlackPieces(initialGame.board.filter(p => p === 'bp' || p === 'bk').length);
     setGameStatus(initialGame.status);
-    setIsComputerMode(!!initialGame.player2_id && initialGame.player2_id === computerId);
+    setIsComputerMode(!!initialGame.player2_id && initialGame.player2_id === COMPUTER_ID);
     setSelectedPiece(null);
     setValidMoves([]);
     setError(null);
     setOpponentActivity(null);
     setLastPlayer2Move(null);
+    
+    // Calculate time left based on last move
     if (initialGame.status === 'active' && initialGame.last_move_at) {
       const lastMoveTime = new Date(initialGame.last_move_at).getTime();
       const now = Date.now();
@@ -241,38 +284,25 @@ export const useCheckersGame = (initialGame?: Game) => {
     }
   }, [initialGame]);
 
-  // Update user balance
-  const updateUserBalance = useCallback(async (userId: string, amount: number) => {
-    // Skip balance updates for computer
-    if (userId === computerId) {
-      console.log(`Computer balance change skipped: ${amount}`);
-      return;
+  // Update user balance with transaction safety
+  const updateUserBalance = useCallback(async (userId: string, amount: number): Promise<number> => {
+    try {
+      // Use the database function for atomic balance updates
+      const { data, error } = await supabase.rpc('update_user_balance', {
+        user_id: userId,
+        amount
+      });
+
+      if (error) {
+        console.error('Error updating user balance:', error.message);
+        throw new Error('Failed to update balance');
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error in updateUserBalance:', error);
+      throw error;
     }
-
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('balance')
-      .eq('id', userId)
-      .single();
-
-    if (userError) {
-      console.error('Error fetching user balance:', userError.message);
-      throw new Error('Failed to update balance');
-    }
-
-    const newBalance = userData.balance + amount;
-    
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({ balance: newBalance })
-      .eq('id', userId);
-
-    if (updateError) {
-      console.error('Error updating user balance:', updateError.message);
-      throw new Error('Failed to update balance');
-    }
-
-    return newBalance;
   }, [supabase]);
 
   // Handle game completion and stake distribution
@@ -283,57 +313,79 @@ export const useCheckersGame = (initialGame?: Game) => {
       const stake = initialGame.stake;
 
       if (isComputerMode) {
-        if (winnerId === computerId) {
-          // Computer wins: player loses stake, no gain for computer
+        // Computer mode: handle stake transfer between player and computer
+        if (winnerId === COMPUTER_ID) {
+          // Computer wins: transfer stake from player to computer
           await updateUserBalance(initialGame.player1_id, -stake);
+          await updateUserBalance(COMPUTER_ID, stake);
         } else {
-          // Player wins: gains stake (computer's stake)
+          // Player wins: transfer stake from computer to player
+          await updateUserBalance(COMPUTER_ID, -stake);
           await updateUserBalance(initialGame.player1_id, stake);
         }
       } else {
+        // Regular game between two players
         if (winnerId === initialGame.player1_id) {
-          await updateUserBalance(initialGame.player1_id, stake * 2);
+          // Player 1 wins: gets both stakes
+          await updateUserBalance(initialGame.player1_id, stake);
+          if (initialGame.player2_id) {
+            await updateUserBalance(initialGame.player2_id, -stake);
+          }
         } else if (winnerId === initialGame.player2_id) {
-          await updateUserBalance(initialGame.player2_id, stake * 2);
+          // Player 2 wins: gets both stakes
+          await updateUserBalance(initialGame.player2_id, stake);
+          await updateUserBalance(initialGame.player1_id, -stake);
         } else {
-          // Draw
+          // Draw - return stakes to both players
           if (initialGame.player1_id) {
-            await updateUserBalance(initialGame.player1_id, -initialGame.stake);
+            await updateUserBalance(initialGame.player1_id, 0); // No change
           }
           if (initialGame.player2_id) {
-            await updateUserBalance(initialGame.player2_id, -initialGame.stake);
+            await updateUserBalance(initialGame.player2_id, 0); // No change
           }
         }
       }
     } catch (error) {
       console.error('Error handling game completion:', error);
       setError('Erreur lors de la distribution des gains');
+      throw error;
     }
-  }, [initialGame, updateUserBalance, isComputerMode, computerId]);
+  }, [initialGame, updateUserBalance, isComputerMode]);
 
   // Activate computer mode
-  const activateComputerMode = useCallback(() => {
-    if (!initialGame) return;
-    setIsComputerMode(true);
-    setGameStatus('active');
-    setOpponentActivity('Vous jouez contre l\'ordinateur (mode difficile)');
+  const activateComputerMode = useCallback(async () => {
+    if (!initialGame || initialGame.player2_id) return;
     
-    supabase
-      .from('games')
-      .update({
-        status: 'active',
-        player2_id: computerId,
-        closes_at: null,
-        stake: initialGame.stake * 2,
-      })
-      .eq('id', initialGame.id)
-      .then(({ error }) => {
-        if (error) {
-          console.error('Error updating game for computer mode:', error.message);
-          setError('Erreur lors de l\'activation du mode ordinateur');
-        }
-      });
-  }, [initialGame, supabase, computerId]);
+    try {
+      // First, deduct stake from computer account
+      await updateUserBalance(COMPUTER_ID, -initialGame.stake);
+      
+      // Then update the game to include computer as player 2
+      const { error } = await supabase
+        .from('games')
+        .update({
+          status: 'active',
+          player2_id: COMPUTER_ID,
+          closes_at: null,
+          stake: initialGame.stake * 2, // Total stake is now player1 + computer
+        })
+        .eq('id', initialGame.id);
+
+      if (error) {
+        // If game update fails, refund the computer
+        await updateUserBalance(COMPUTER_ID, initialGame.stake);
+        throw error;
+      }
+
+      setIsComputerMode(true);
+      setGameStatus('active');
+      setOpponentActivity('Vous jouez contre l\'ordinateur (mode difficile)');
+    } catch (error) {
+      console.error('Error activating computer mode:', error);
+      setError('Erreur lors de l\'activation du mode ordinateur');
+      throw error;
+    }
+  }, [initialGame, supabase, updateUserBalance]);
 
   // Check for computer mode activation
   useEffect(() => {
@@ -343,13 +395,22 @@ export const useCheckersGame = (initialGame?: Game) => {
     const now = Date.now();
     const timeSinceCreation = (now - createdAt) / 1000;
 
-    if (timeSinceCreation >= 60) {
-      activateComputerMode();
-      return;
+    // Clear any existing timer
+    if (computerModeTimerRef.current) {
+      clearTimeout(computerModeTimerRef.current);
+      computerModeTimerRef.current = null;
     }
 
-    const remainingTime = 60 - timeSinceCreation;
-    computerModeTimerRef.current = setTimeout(activateComputerMode, remainingTime * 1000);
+    if (timeSinceCreation >= 60) {
+      // If already past the time, activate computer mode immediately
+      activateComputerMode().catch(console.error);
+    } else {
+      // Set a timer for the remaining time
+      const remainingTime = 60 - timeSinceCreation;
+      computerModeTimerRef.current = setTimeout(() => {
+        activateComputerMode().catch(console.error);
+      }, remainingTime * 1000);
+    }
 
     return () => {
       if (computerModeTimerRef.current) {
@@ -372,6 +433,7 @@ export const useCheckersGame = (initialGame?: Game) => {
       let bestScore = isMaximizing ? -Infinity : Infinity;
       const allMoves: { from: Position; to: Move }[] = [];
 
+      // Precompute all possible moves
       for (let row = 0; row < BOARD_SIZE; row++) {
         for (let col = 0; col < BOARD_SIZE; col++) {
           const piece = board[row][col];
@@ -385,6 +447,13 @@ export const useCheckersGame = (initialGame?: Game) => {
       if (allMoves.length === 0) {
         return { score: isMaximizing ? -1000 + depth : 1000 - depth, move: null };
       }
+
+      // Sort moves for better alpha-beta pruning efficiency
+      allMoves.sort((a, b) => {
+        const scoreA = evaluateMove(board, a.from, a.to);
+        const scoreB = evaluateMove(board, b.from, b.to);
+        return isMaximizing ? scoreB - scoreA : scoreA - scoreB;
+      });
 
       for (const { from, to } of allMoves) {
         const { newBoard } = movePiece(board, from, { row: to.row, col: to.col }, to.isJump, to.captured);
@@ -412,6 +481,30 @@ export const useCheckersGame = (initialGame?: Game) => {
     []
   );
 
+  // Evaluate a single move for move ordering
+  const evaluateMove = useCallback((board: Board, from: Position, to: Move): number => {
+    let score = 0;
+    
+    // Prioritize captures
+    if (to.isJump && to.captured) {
+      score += 10;
+    }
+    
+    // Prioritize king promotions
+    const piece = board[from.row][from.col];
+    if (piece && !piece.isKing) {
+      if ((piece.player === 'red' && to.row === 0) || (piece.player === 'black' && to.row === BOARD_SIZE - 1)) {
+        score += 5;
+      }
+    }
+    
+    // Center control
+    const centerCol = Math.floor(BOARD_SIZE / 2);
+    score -= Math.abs(to.col - centerCol) * 0.1;
+    
+    return score;
+  }, []);
+
   // Evaluate board for minimax
   const evaluateBoard = useCallback((board: Board): number => {
     let score = 0;
@@ -419,10 +512,24 @@ export const useCheckersGame = (initialGame?: Game) => {
       for (let col = 0; col < BOARD_SIZE; col++) {
         const piece = board[row][col];
         if (!piece) continue;
+        
         const value = piece.isKing ? 5 : 1;
         score += piece.player === 'red' ? value : -value;
-        if (piece.player === 'red') score += (7 - row) * 0.1;
-        else score -= row * 0.1;
+        
+        // Positional advantage
+        if (piece.player === 'red') {
+          score += (7 - row) * 0.1;
+          // Back row defense bonus
+          if (row === BOARD_SIZE - 1) score += 0.2;
+        } else {
+          score -= row * 0.1;
+          // Back row defense bonus
+          if (row === 0) score -= 0.2;
+        }
+        
+        // Center control bonus
+        const centerCol = Math.floor(BOARD_SIZE / 2);
+        score += (piece.player === 'red' ? 1 : -1) * (0.1 / (Math.abs(col - centerCol) + 1));
       }
     }
     return score;
@@ -432,99 +539,130 @@ export const useCheckersGame = (initialGame?: Game) => {
   const makeComputerMove = useCallback(async () => {
     if (!isComputerMode || !initialGame || currentPlayer !== 'red' || gameStatus !== 'active') return;
 
-    const { move } = minimax(board, 4, true, -Infinity, Infinity);
+    try {
+      const { move } = minimax(board, 4, true, -Infinity, Infinity);
 
-    if (!move) {
-      const updateData: Partial<Game> = {
-        status: 'finished',
-        winner_id: initialGame.player1_id,
-      };
-      await supabase.from('games').update(updateData).eq('id', initialGame.id);
-      setGameStatus('finished');
-      setError('Partie terminée ! Vous avez gagné !');
-      handleGameCompletion(initialGame.player1_id);
-      return;
-    }
+      if (!move) {
+        // No valid moves, player wins
+        const updateData: Partial<Game> = {
+          status: 'finished',
+          winner_id: initialGame.player1_id,
+        };
+        
+        const { error } = await supabase
+          .from('games')
+          .update(updateData)
+          .eq('id', initialGame.id);
+          
+        if (error) throw error;
+        
+        setGameStatus('finished');
+        setError('Partie terminée ! Vous avez gagné !');
+        await handleGameCompletion(initialGame.player1_id);
+        return;
+      }
 
-    const { newBoard, newRedPieces, newBlackPieces } = movePiece(
-      board,
-      move.from,
-      { row: move.to.row, col: move.to.col },
-      move.to.isJump,
-      move.to.captured
-    );
-
-    setBoard(newBoard);
-    setRedPieces(newRedPieces);
-    setBlackPieces(newBlackPieces);
-    setTimeLeft(30);
-    setOpponentActivity(`L'ordinateur a déplacé de (${move.from.row}, ${move.from.col}) à (${move.to.row}, ${move.to.col})`);
-    setLastPlayer2Move({ from: move.from, to: { row: move.to.row, col: move.to.col } });
-
-    const winner = checkGameOver(newBoard, 'red');
-    const updateData: Partial<Game> = {
-      board: clientToSupabaseBoard(newBoard),
-      current_player: 'black',
-      last_move_at: new Date().toISOString(),
-    };
-
-    if (winner) {
-      updateData.status = 'finished';
-      updateData.winner_id = computerId;
-    }
-
-    const { error } = await supabase
-      .from('games')
-      .update(updateData)
-      .eq('id', initialGame.id);
-
-    if (error) {
-      setError('Erreur lors du mouvement de l\'ordinateur : ' + error.message);
-      return;
-    }
-
-    if (socketRef.current) {
-      socketRef.current.send(
-        JSON.stringify({
-          type: 'move',
-          board: clientToSupabaseBoard(newBoard),
-          currentPlayer: 'black',
-          redPieces: newRedPieces,
-          blackPieces: newBlackPieces,
-          status: winner ? 'finished' : 'active',
-          winner_id: winner ? computerId : null,
-          last_move_at: new Date().toISOString(),
-          moveDetails: {
-            from: move.from,
-            to: { row: move.to.row, col: move.to.col },
-            isJump: move.to.isJump,
-          },
-        })
+      const { newBoard, newRedPieces, newBlackPieces } = movePiece(
+        board,
+        move.from,
+        { row: move.to.row, col: move.to.col },
+        move.to.isJump,
+        move.to.captured
       );
-    }
 
-    setCurrentPlayer('black');
-    if (winner) {
-      setGameStatus('finished');
-      setTimeLeft(0);
-      handleGameCompletion(computerId);
+      setBoard(newBoard);
+      setRedPieces(newRedPieces);
+      setBlackPieces(newBlackPieces);
+      setTimeLeft(30);
+      setOpponentActivity(`L'ordinateur a déplacé de (${move.from.row}, ${move.from.col}) à (${move.to.row}, ${move.to.col})`);
+      setLastPlayer2Move({ from: move.from, to: { row: move.to.row, col: move.to.col } });
+
+      const winner = checkGameOver(newBoard, 'red');
+      const updateData: Partial<Game> = {
+        board: clientToSupabaseBoard(newBoard),
+        current_player: 'black',
+        last_move_at: new Date().toISOString(),
+      };
+
+      if (winner) {
+        updateData.status = 'finished';
+        updateData.winner_id = COMPUTER_ID;
+      }
+
+      const { error } = await supabase
+        .from('games')
+        .update(updateData)
+        .eq('id', initialGame.id);
+
+      if (error) {
+        setError('Erreur lors du mouvement de l\'ordinateur : ' + error.message);
+        return;
+      }
+
+      if (socketRef.current) {
+        socketRef.current.send(
+          JSON.stringify({
+            type: 'move',
+            board: clientToSupabaseBoard(newBoard),
+            currentPlayer: 'black',
+            redPieces: newRedPieces,
+            blackPieces: newBlackPieces,
+            status: winner ? 'finished' : 'active',
+            winner_id: winner ? COMPUTER_ID : null,
+            last_move_at: new Date().toISOString(),
+            moveDetails: {
+              from: move.from,
+              to: { row: move.to.row, col: move.to.col },
+              isJump: move.to.isJump,
+            },
+          })
+        );
+      }
+
+      setCurrentPlayer('black');
+      if (winner) {
+        setGameStatus('finished');
+        setTimeLeft(0);
+        await handleGameCompletion(COMPUTER_ID);
+      }
+    } catch (error) {
+      console.error('Error in makeComputerMove:', error);
+      setError('Erreur lors du mouvement de l\'ordinateur');
     }
-  }, [isComputerMode, initialGame, currentPlayer, gameStatus, board, supabase, handleGameCompletion, minimax, computerId]);
+  }, [isComputerMode, initialGame, currentPlayer, gameStatus, board, supabase, handleGameCompletion, minimax]);
 
   // Trigger computer move
   useEffect(() => {
     if (isComputerMode && currentPlayer === 'red' && gameStatus === 'active') {
-      const timer = setTimeout(() => {
+      // Clear any existing timer
+      if (computerMoveTimerRef.current) {
+        clearTimeout(computerMoveTimerRef.current);
+        computerMoveTimerRef.current = null;
+      }
+      
+      computerMoveTimerRef.current = setTimeout(() => {
         makeComputerMove();
-      }, 1000);
-      return () => clearTimeout(timer);
+      }, COMPUTER_MOVE_DELAY);
+      
+      return () => {
+        if (computerMoveTimerRef.current) {
+          clearTimeout(computerMoveTimerRef.current);
+        }
+      };
     }
   }, [isComputerMode, currentPlayer, gameStatus, makeComputerMove]);
 
   // Handle timer countdown
   useEffect(() => {
-    if (gameStatus !== 'active') return;
+    if (gameStatus !== 'active') {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
 
+    // Clear any existing timer
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -533,8 +671,10 @@ export const useCheckersGame = (initialGame?: Game) => {
     timerRef.current = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
+          // Timeout handling - switch player
+          const nextPlayer = currentPlayer === 'black' ? 'red' : 'black';
+          
           if (socketRef.current && initialGame) {
-            const nextPlayer = currentPlayer === 'black' ? 'red' : 'black';
             socketRef.current.send(
               JSON.stringify({
                 type: 'timeout',
@@ -547,10 +687,10 @@ export const useCheckersGame = (initialGame?: Game) => {
                 last_move_at: new Date().toISOString(),
               })
             );
-            setCurrentPlayer(nextPlayer);
-            return 30;
           }
-          return 0;
+          
+          setCurrentPlayer(nextPlayer);
+          return 30;
         }
         return prev - 1;
       });
@@ -568,50 +708,58 @@ export const useCheckersGame = (initialGame?: Game) => {
       throw new Error('Impossible de rejoindre cette partie');
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user || user.id === initialGame.player1_id) {
-      setError('Non autorisé à rejoindre cette partie');
-      throw new Error('Non autorisé à rejoindre cette partie');
+    try {
+      const userId = await getCurrentUserId();
+      if (!userId || userId === initialGame.player1_id) {
+        setError('Non autorisé à rejoindre cette partie');
+        throw new Error('Non autorisé à rejoindre cette partie');
+      }
+
+      // Check user balance
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('balance')
+        .eq('id', userId)
+        .single();
+
+      if (userError || !userData || userData.balance < initialGame.stake) {
+        setError('Solde insuffisant pour rejoindre');
+        throw new Error('Solde insuffisant pour rejoindre');
+      }
+
+      // Deduct stake from user first
+      await updateUserBalance(userId, -initialGame.stake);
+
+      // Then update game - stake becomes the sum of both players' stakes
+      const { error: gameError } = await supabase
+        .from('games')
+        .update({
+          player2_id: userId,
+          status: 'active',
+          closes_at: null,
+          stake: initialGame.stake * 2, // Total stake is now player1 + player2
+        })
+        .eq('id', initialGame.id);
+
+      if (gameError) {
+        // If game update fails, refund the user
+        await updateUserBalance(userId, initialGame.stake);
+        throw gameError;
+      }
+
+      setGameStatus('active');
+      
+      // Clear computer mode timer if it exists
+      if (computerModeTimerRef.current) {
+        clearTimeout(computerModeTimerRef.current);
+        computerModeTimerRef.current = null;
+      }
+    } catch (error) {
+      console.error('Error joining game:', error);
+      setError('Erreur lors de la jointure : ' + (error as Error).message);
+      throw error;
     }
-
-    const { data: userData } = await supabase
-      .from('users')
-      .select('balance')
-      .eq('id', user.id)
-      .single();
-
-    if (!userData || userData.balance < initialGame.stake) {
-      setError('Solde insuffisant pour rejoindre');
-      throw new Error('Solde insuffisant pour rejoindre');
-    }
-
-    const { error: balanceError } = await supabase
-      .from('users')
-      .update({ balance: userData.balance - initialGame.stake })
-      .eq('id', user.id);
-
-    if (balanceError) {
-      setError('Erreur lors de la mise à jour du solde : ' + balanceError.message);
-      throw new Error(balanceError.message);
-    }
-
-    const { error: gameError } = await supabase
-      .from('games')
-      .update({
-        player2_id: user.id,
-        status: 'active',
-        closes_at: null,
-        stake: initialGame.stake * 2,
-      })
-      .eq('id', initialGame.id);
-
-    if (gameError) {
-      setError('Erreur lors de la jointure : ' + gameError.message);
-      throw new Error(gameError.message);
-    }
-
-    setGameStatus('active');
-  }, [initialGame, supabase, isComputerMode]);
+  }, [initialGame, supabase, isComputerMode, getCurrentUserId, updateUserBalance]);
 
   // Handle resigning the game
   const resignGame = useCallback(async () => {
@@ -620,50 +768,64 @@ export const useCheckersGame = (initialGame?: Game) => {
       return;
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user || (user.id !== initialGame.player1_id && user.id !== initialGame.player2_id)) {
-      setError('Non autorisé à abandonner');
-      return;
+    try {
+      const userId = await getCurrentUserId();
+      if (!userId || (userId !== initialGame.player1_id && userId !== initialGame.player2_id)) {
+        setError('Non autorisé à abandonner');
+        return;
+      }
+
+      // Determine winner based on who is resigning
+      let winnerId: string | null = null;
+      
+      if (isComputerMode) {
+        winnerId = COMPUTER_ID;
+      } else {
+        winnerId = userId === initialGame.player1_id 
+          ? initialGame.player2_id 
+          : initialGame.player1_id;
+      }
+
+      // Update the game status
+      const updateData: Partial<Game> = {
+        status: 'finished',
+        winner_id: winnerId,
+      };
+
+      const { error: gameError } = await supabase
+        .from('games')
+        .update(updateData)
+        .eq('id', initialGame.id);
+
+      if (gameError) {
+        console.error('Error updating game status:', gameError);
+        throw new Error(`Failed to update game status: ${gameError.message}`);
+      }
+
+      // Handle stake distribution
+      await handleGameCompletion(winnerId);
+
+      // Notify via socket
+      if (socketRef.current) {
+        socketRef.current.send(
+          JSON.stringify({
+            type: 'resign',
+            player_id: userId,
+            status: 'finished',
+            winner_id: winnerId,
+          })
+        );
+      }
+
+      // Update local state
+      setGameStatus('finished');
+      setError('Vous avez abandonné la partie !');
+      
+    } catch (error) {
+      console.error('Error resigning game:', error);
+      setError('Erreur lors de l\'abandon : ' + (error as Error).message);
     }
-
-    const winnerId = isComputerMode
-      ? computerId
-      : (user.id === initialGame.player1_id ? initialGame.player2_id : initialGame.player1_id);
-
-    const updateData: Partial<Game> = {
-      status: 'finished',
-      winner_id: winnerId,
-    };
-
-    const { error } = await supabase
-      .from('games')
-      .update(updateData)
-      .eq('id', initialGame.id);
-
-    if (error) {
-      setError('Erreur lors de l\'abandon : ' + error.message);
-      return;
-    }
-
-    await handleGameCompletion(winnerId);
-
-    if (socketRef.current) {
-      socketRef.current.send(
-        JSON.stringify({
-          type: 'resign',
-          player_id: user.id,
-          status: 'finished',
-          winner_id: winnerId,
-        })
-      );
-    } else {
-      setError('Connexion au serveur de jeu non établie');
-      return;
-    }
-
-    setGameStatus('finished');
-    setError('Vous avez abandonné la partie !');
-  }, [initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode, computerId]);
+  }, [initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode, getCurrentUserId]);
 
   // Real-time updates with PartyKit
   useEffect(() => {
@@ -676,78 +838,97 @@ export const useCheckersGame = (initialGame?: Game) => {
     socketRef.current = socket;
 
     socket.onmessage = async (event) => {
-      const { type, board: newSupabaseBoard, currentPlayer: newPlayer, redPieces, blackPieces, status, winner_id, player_id, last_move_at, moveDetails } = JSON.parse(event.data);
-      if (type === 'move' || type === 'timeout') {
-        const newBoard = supabaseToClientBoard(newSupabaseBoard);
-        setBoard(newBoard);
-        setCurrentPlayer(newPlayer === 'white' ? 'red' : 'black');
-        setRedPieces(redPieces);
-        setBlackPieces(blackPieces);
-        setGameStatus(status);
-        setSelectedPiece(null);
-        setValidMoves([]);
+      try {
+        const message = JSON.parse(event.data);
+        const { type, board: newSupabaseBoard, currentPlayer: newPlayer, redPieces, blackPieces, status, winner_id, player_id, last_move_at, moveDetails } = message;
+        
+        if (type === 'move' || type === 'timeout') {
+          const newBoard = supabaseToClientBoard(newSupabaseBoard);
+          setBoard(newBoard);
+          setCurrentPlayer(newPlayer === 'white' ? 'red' : 'black');
+          setRedPieces(redPieces);
+          setBlackPieces(blackPieces);
+          setGameStatus(status);
+          setSelectedPiece(null);
+          setValidMoves([]);
 
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user && moveDetails && player_id !== user.id && newPlayer === 'black') {
-          const moveText = isComputerMode
-            ? `L'ordinateur a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`
-            : `L'adversaire a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`;
-          setOpponentActivity(moveText);
-          setLastPlayer2Move({ from: moveDetails.from, to: { row: moveDetails.to.row, col: moveDetails.to.col } });
-        } else {
-          setOpponentActivity(null);
-          setLastPlayer2Move(null);
-        }
-
-        if (last_move_at) {
-          const lastMoveTime = new Date(last_move_at).getTime();
-          const now = Date.now();
-          const elapsed = Math.floor((now - lastMoveTime) / 1000);
-          const remaining = Math.max(30 - elapsed, 0);
-          setTimeLeft(remaining);
-        } else {
-          setTimeLeft(30);
-        }
-
-        if (status === 'finished' && winner_id) {
-          setError(`Partie terminée ! Gagnant : ${winner_id}`);
-          setLastPlayer2Move(null);
-          handleGameCompletion(winner_id);
-        }
-      } else if (type === 'opponent_active') {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user && player_id !== user.id && !isComputerMode) {
-          const isCurrentPlayer = (
-            (user.id === initialGame?.player1_id && currentPlayer === 'black') ||
-            (user.id === initialGame?.player2_id && currentPlayer === 'red')
-          );
-          if (!isCurrentPlayer) {
-            setOpponentActivity('Votre adversaire réfléchit...');
+          const userId = await getCurrentUserId();
+          if (userId && moveDetails && player_id !== userId && newPlayer === 'black') {
+            const moveText = isComputerMode
+              ? `L'ordinateur a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`
+              : `L'adversaire a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`;
+            setOpponentActivity(moveText);
+            setLastPlayer2Move({ from: moveDetails.from, to: { row: moveDetails.to.row, col: moveDetails.to.col } });
+          } else {
+            setOpponentActivity(null);
+            setLastPlayer2Move(null);
           }
+
+          if (last_move_at) {
+            const lastMoveTime = new Date(last_move_at).getTime();
+            const now = Date.now();
+            const elapsed = Math.floor((now - lastMoveTime) / 1000);
+            const remaining = Math.max(30 - elapsed, 0);
+            setTimeLeft(remaining);
+          } else {
+            setTimeLeft(30);
+          }
+
+          if (status === 'finished' && winner_id) {
+            setError(`Partie terminée ! Gagnant : ${winner_id}`);
+            setLastPlayer2Move(null);
+            await handleGameCompletion(winner_id);
+          }
+        } else if (type === 'opponent_active') {
+          const userId = await getCurrentUserId();
+          if (userId && player_id !== userId && !isComputerMode) {
+            const isPlayerTurn = await isCurrentPlayer();
+            if (!isPlayerTurn) {
+              setOpponentActivity('Votre adversaire réfléchit...');
+            }
+          }
+        } else if (type === 'resign') {
+          const userId = await getCurrentUserId();
+          if (userId) {
+            setGameStatus('finished');
+            setError(`Partie terminée ! ${player_id === userId ? 'Vous avez abandonné.' : 'Votre adversaire a abandonné.'}`);
+            setTimeLeft(0);
+            setLastPlayer2Move(null);
+            
+            const winnerId = player_id === userId
+              ? (isComputerMode ? COMPUTER_ID : (userId === initialGame.player1_id ? initialGame.player2_id : initialGame.player1_id))
+              : userId;
+              
+            await handleGameCompletion(winnerId);
+          }
+        } else if (type === 'player_joined') {
+          // If a real player joins, cancel computer mode
+          if (computerModeTimerRef.current) {
+            clearTimeout(computerModeTimerRef.current);
+            computerModeTimerRef.current = null;
+          }
+          setIsComputerMode(false);
         }
-      } else if (type === 'resign') {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setGameStatus('finished');
-          setError(`Partie terminée ! ${player_id === user.id ? 'Vous avez abandonné.' : 'Votre adversaire a abandonné.'}`);
-          setTimeLeft(0);
-          setLastPlayer2Move(null);
-          const winnerId = player_id === user.id
-            ? (isComputerMode ? computerId : (user.id === initialGame.player1_id ? initialGame.player2_id : initialGame.player1_id))
-            : user.id;
-          handleGameCompletion(winnerId);
-        }
+      } catch (error) {
+        console.error('Error processing socket message:', error);
       }
     };
 
-    socket.onerror = () => setError('Connexion au serveur de jeu échouée.');
-    socket.onclose = () => setError('Déconnecté du serveur de jeu.');
+    socket.onerror = (error) => {
+      console.error('Socket error:', error);
+      setError('Connexion au serveur de jeu échouée.');
+    };
+    
+    socket.onclose = () => {
+      console.log('Socket closed');
+      setError('Déconnecté du serveur de jeu.');
+    };
 
     return () => {
       socket.close();
       socketRef.current = null;
     };
-  }, [initialGame, supabase, handleGameCompletion, isComputerMode, computerId]);
+  }, [initialGame, supabase, handleGameCompletion, isComputerMode, getCurrentUserId, isCurrentPlayer]);
 
   // Handle square click
   const handleSquareClick = useCallback(
@@ -757,154 +938,172 @@ export const useCheckersGame = (initialGame?: Game) => {
         return;
       }
 
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setError('Veuillez vous connecter pour jouer');
-        return;
-      }
+      try {
+        const userId = await getCurrentUserId();
+        if (!userId) {
+          setError('Veuillez vous connecter pour jouer');
+          return;
+        }
 
-      const isPlayer1 = user.id === initialGame.player1_id;
-      const isPlayer2 = user.id === initialGame.player2_id;
-      if (
-        (isPlayer1 && currentPlayer !== 'black') ||
-        (isPlayer2 && currentPlayer !== 'red') ||
-        (!isPlayer1 && !isPlayer2 && !isComputerMode)
-      ) {
-        setError('Ce n\'est pas votre tour ou vous n\'êtes pas autorisé');
-        return;
-      }
+        const isPlayerTurn = await isCurrentPlayer();
+        if (!isPlayerTurn) {
+          setError('Ce n\'est pas votre tour');
+          return;
+        }
 
-      if (selectedPiece) {
-        const move = validMoves.find(m => m.row === row && m.col === col);
-        if (move) {
-          const { newBoard, newRedPieces, newBlackPieces } = movePiece(board, selectedPiece, { row, col }, move.isJump, move.captured);
-          const nextPlayer = currentPlayer === 'black' ? 'red' : 'black';
-          const jumpMoves = move.isJump ? canJumpAgain(newBoard, { row, col }, currentPlayer) : [];
+        if (selectedPiece) {
+          const move = validMoves.find(m => m.row === row && m.col === col);
+          if (move) {
+            const { newBoard, newRedPieces, newBlackPieces } = movePiece(board, selectedPiece, { row, col }, move.isJump, move.captured);
+            const nextPlayer = currentPlayer === 'black' ? 'red' : 'black';
+            const jumpMoves = move.isJump ? canJumpAgain(newBoard, { row, col }, currentPlayer) : [];
 
-          if (jumpMoves.length > 0 && move.isJump) {
-            setBoard(newBoard);
-            setSelectedPiece({ row, col });
-            setValidMoves(jumpMoves);
-            setRedPieces(newRedPieces);
-            setBlackPieces(newBlackPieces);
-            setTimeLeft(30);
-            if (socketRef.current) {
-              socketRef.current.send(
-                JSON.stringify({
-                  type: 'move',
-                  board: clientToSupabaseBoard(newBoard),
-                  currentPlayer: currentPlayer === 'black' ? 'black' : 'white',
-                  redPieces: newRedPieces,
-                  blackPieces: newBlackPieces,
-                  status: 'active',
-                  player_id: user.id,
-                  last_move_at: new Date().toISOString(),
-                  moveDetails: {
-                    from: selectedPiece,
-                    to: { row, col },
-                    isJump: move.isJump,
-                  },
-                })
-              );
-            }
-            if (currentPlayer === 'red') {
-              setLastPlayer2Move({ from: selectedPiece, to: { row, col } });
+            if (jumpMoves.length > 0 && move.isJump) {
+              // Continue with jump sequence
+              setBoard(newBoard);
+              setSelectedPiece({ row, col });
+              setValidMoves(jumpMoves);
+              setRedPieces(newRedPieces);
+              setBlackPieces(newBlackPieces);
+              setTimeLeft(30);
+              
+              if (socketRef.current) {
+                socketRef.current.send(
+                  JSON.stringify({
+                    type: 'move',
+                    board: clientToSupabaseBoard(newBoard),
+                    currentPlayer: currentPlayer === 'black' ? 'black' : 'white',
+                    redPieces: newRedPieces,
+                    blackPieces: newBlackPieces,
+                    status: 'active',
+                    player_id: userId,
+                    last_move_at: new Date().toISOString(),
+                    moveDetails: {
+                      from: selectedPiece,
+                      to: { row, col },
+                      isJump: move.isJump,
+                    },
+                  })
+                );
+              }
+              
+              if (currentPlayer === 'red') {
+                setLastPlayer2Move({ from: selectedPiece, to: { row, col } });
+              }
+            } else {
+              // Complete the move
+              setBoard(newBoard);
+              setSelectedPiece(null);
+              setValidMoves([]);
+              setRedPieces(newRedPieces);
+              setBlackPieces(newBlackPieces);
+              setTimeLeft(30);
+              
+              if (currentPlayer === 'red') {
+                setLastPlayer2Move({ from: selectedPiece, to: { row, col } });
+              }
+
+              const winner = checkGameOver(newBoard, currentPlayer);
+              const updateData: Partial<Game> = {
+                board: clientToSupabaseBoard(newBoard),
+                current_player: nextPlayer === 'black' ? 'black' : 'white',
+                last_move_at: new Date().toISOString(),
+              };
+
+              if (winner) {
+                updateData.status = 'finished';
+                updateData.winner_id = isComputerMode && winner === 'red'
+                  ? COMPUTER_ID
+                  : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id);
+              }
+
+              const { error } = await supabase
+                .from('games')
+                .update(updateData)
+                .eq('id', initialGame.id);
+
+              if (error) throw error;
+
+              if (socketRef.current) {
+                socketRef.current.send(
+                  JSON.stringify({
+                    type: 'move',
+                    board: clientToSupabaseBoard(newBoard),
+                    currentPlayer: nextPlayer === 'black' ? 'black' : 'white',
+                    redPieces: newRedPieces,
+                    blackPieces: newBlackPieces,
+                    status: winner ? 'finished' : 'active',
+                    winner_id: winner
+                      ? (isComputerMode && winner === 'red'
+                          ? COMPUTER_ID
+                          : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id))
+                      : null,
+                    player_id: userId,
+                    last_move_at: new Date().toISOString(),
+                    moveDetails: {
+                      from: selectedPiece,
+                      to: { row, col },
+                      isJump: move.isJump,
+                    },
+                  })
+                );
+              }
+
+              setCurrentPlayer(nextPlayer);
+              if (winner) {
+                setGameStatus('finished');
+                setTimeLeft(0);
+                setLastPlayer2Move(null);
+                await handleGameCompletion(
+                  isComputerMode && winner === 'red'
+                    ? COMPUTER_ID
+                    : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id)
+                );
+              }
             }
           } else {
-            setBoard(newBoard);
             setSelectedPiece(null);
             setValidMoves([]);
-            setRedPieces(newRedPieces);
-            setBlackPieces(newBlackPieces);
-            setTimeLeft(30);
-            if (currentPlayer === 'red') {
-              setLastPlayer2Move({ from: selectedPiece, to: { row, col } });
-            }
-
-            const winner = checkGameOver(newBoard, currentPlayer);
-            const updateData: Partial<Game> = {
-              board: clientToSupabaseBoard(newBoard),
-              current_player: nextPlayer === 'black' ? 'black' : 'white',
-              last_move_at: new Date().toISOString(),
-            };
-
-            if (winner) {
-              updateData.status = 'finished';
-              updateData.winner_id = isComputerMode && winner === 'red'
-                ? computerId
-                : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id);
-            }
-
-            const { error } = await supabase
-              .from('games')
-              .update(updateData)
-              .eq('id', initialGame.id);
-
-            if (error) {
-              setError('Erreur lors de la mise à jour : ' + error.message);
-              return;
-            }
-
+          }
+        } else {
+          const piece = board[row][col];
+          if (piece && piece.player === currentPlayer) {
+            const moves = getValidMoves(board, { row, col }, currentPlayer);
+            setSelectedPiece({ row, col });
+            setValidMoves(moves);
+            
             if (socketRef.current) {
               socketRef.current.send(
                 JSON.stringify({
-                  type: 'move',
-                  board: clientToSupabaseBoard(newBoard),
-                  currentPlayer: nextPlayer === 'black' ? 'black' : 'white',
-                  redPieces: newRedPieces,
-                  blackPieces: newBlackPieces,
-                  status: winner ? 'finished' : 'active',
-                  winner_id: winner
-                    ? (isComputerMode && winner === 'red'
-                        ? computerId
-                        : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id))
-                    : null,
-                  player_id: user.id,
-                  last_move_at: new Date().toISOString(),
-                  moveDetails: {
-                    from: selectedPiece,
-                    to: { row, col },
-                    isJump: move.isJump,
-                  },
+                  type: 'opponent_active',
+                  player_id: userId,
                 })
               );
             }
-
-            setCurrentPlayer(nextPlayer);
-            if (winner) {
-              setGameStatus('finished');
-              setTimeLeft(0);
-              setLastPlayer2Move(null);
-              handleGameCompletion(
-                isComputerMode && winner === 'red'
-                  ? computerId
-                  : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id)
-              );
-            }
-          }
-        } else {
-          setSelectedPiece(null);
-          setValidMoves([]);
-        }
-      } else {
-        const piece = board[row][col];
-        if (piece && piece.player === currentPlayer) {
-          const moves = getValidMoves(board, { row, col }, currentPlayer);
-          setSelectedPiece({ row, col });
-          setValidMoves(moves);
-          if (socketRef.current) {
-            socketRef.current.send(
-              JSON.stringify({
-                type: 'opponent_active',
-                player_id: user.id,
-              })
-            );
           }
         }
+      } catch (error) {
+        console.error('Error in handleSquareClick:', error);
+        setError('Erreur lors du mouvement : ' + (error as Error).message);
       }
     },
-    [board, currentPlayer, selectedPiece, validMoves, initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode, computerId]
+    [board, currentPlayer, selectedPiece, validMoves, initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode, getCurrentUserId, isCurrentPlayer]
   );
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Clear all timers
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (computerModeTimerRef.current) clearTimeout(computerModeTimerRef.current);
+      if (computerMoveTimerRef.current) clearTimeout(computerMoveTimerRef.current);
+      
+      // Close socket
+      if (socketRef.current) {
+        socketRef.current.close();
+      }
+    };
+  }, []);
 
   return {
     board,

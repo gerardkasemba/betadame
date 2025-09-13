@@ -27,6 +27,28 @@ export interface Game {
   created_at: string;
   closes_at: string;
   last_move_at?: string;
+  finished_at?: string; //add this
 }
+
+export interface ProfileData {
+  id: string;
+  age: number | null;
+  preferred_payment_method: string;
+  balance: number;
+}
+
+export interface Transaction {
+  id: number;
+  user_id: string;
+  balance_before: number;
+  request_type: 'deposit' | 'withdraw';
+  amount: number;
+  status: 'pending' | 'completed' | 'canceled';
+  reason: string | null;
+  created_at: string;
+  processed_at: string | null;
+}
+
+
 
 export type Board = (Piece | null)[][];

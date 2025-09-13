@@ -23,7 +23,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="BetaDame" />
         <link rel="manifest" href="/site.webmanifest" />
       </head>
-      <body className="bg-congoleseBlue text-white">
+      <body className="bg-white text-[#222]">
         <SupabaseProvider>
           <Navbar />
           <main className="container mx-auto pb-36 md:pb-4">

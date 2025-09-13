@@ -93,7 +93,7 @@ export default function ResetPassword() {
   if (isTokenValid === null) {
     return (
       <div className="flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 text-center">
+        <div className="w-full max-w-md p-8 text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800 mx-auto mb-4"></div>
           <p className="text-gray-600">Vérification du lien...</p>
         </div>
@@ -104,7 +104,7 @@ export default function ResetPassword() {
   if (isTokenValid === false) {
     return (
       <div className="flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 md:p-8">
+        <div className="w-full max-w-md p-6 md:p-8">
           <div className="text-center mb-8">
             <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
               <FiAlertCircle className="text-red-600 text-2xl" />
@@ -125,7 +125,7 @@ export default function ResetPassword() {
             
             <div className="mt-6">
               <Link 
-                href="/auth/login" 
+                href="/" 
                 className="text-blue-600 hover:text-blue-700 font-medium"
               >
                 Retour à la connexion
@@ -179,7 +179,7 @@ export default function ResetPassword() {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 placeholder="Votre nouveau mot de passe"
-                className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full text-[#222] pl-10 pr-12 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
                 disabled={loading}
                 minLength={6}
@@ -206,7 +206,7 @@ export default function ResetPassword() {
                 value={repeatPassword}
                 onChange={e => setRepeatPassword(e.target.value)}
                 placeholder="Confirmez votre mot de passe"
-                className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full text-[#222] pl-10 pr-12 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
                 disabled={loading}
               />
