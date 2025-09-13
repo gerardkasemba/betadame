@@ -10,12 +10,24 @@ export async function middleware(req: NextRequest) {
   // Refresh session if exists
   const { data: { session }, error } = await supabase.auth.getSession();
 
-  // Protect routes
-  const protectedRoutes = ['/lobby', '/game', '/profile'];
+  // Define protected routes (require authentication)
+  const protectedRoutes = ['/lobby', '/game', '/profile', '/admin'];
   const isProtectedRoute = protectedRoutes.some(route =>
     req.nextUrl.pathname.startsWith(route)
   );
 
+  // Define auth routes (should not be accessible when authenticated)
+  const authRoutes = ['/auth/login', '/auth/register'];
+  const isAuthRoute = authRoutes.includes(req.nextUrl.pathname);
+
+  // Redirect authenticated users away from auth routes
+  if (isAuthRoute && session && !error) {
+    // Redirect to lobby or the redirectTo parameter if exists
+    const redirectTo = req.nextUrl.searchParams.get('redirectTo') || '/lobby';
+    return NextResponse.redirect(new URL(redirectTo, req.url));
+  }
+
+  // Protect routes that require authentication
   if (isProtectedRoute && (!session || error)) {
     // Redirect unauthenticated users to login with redirectTo query
     const redirectUrl = new URL('/auth/login', req.url);
@@ -28,10 +40,7 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    '/lobby/:path*',
-    '/game/:path*',
-    '/profile/:path*',
-    // Exclude public routes
-    '/((?!auth/login|auth/register|auth/callback).*)',
+    // Match all routes except static files and API routes
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 };

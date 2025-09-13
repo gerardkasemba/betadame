@@ -257,7 +257,7 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <div className="bg-gray-50 flex items-center justify-center">
+      <div className="flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0072CE] mx-auto"></div>
           <p className="mt-4 text-gray-600">Chargement de votre profil...</p>
@@ -267,7 +267,7 @@ export default function Profile() {
   }
 
   return (
-    <div className="bg-gray-50 p-4 md:p-6">
+    <div className="p-4 md:p-6">
       <div className="max-w-4xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center">
@@ -343,17 +343,17 @@ export default function Profile() {
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div className="p-3 bg-gray-50 rounded-lg">
+                <div className="p-3 rounded-lg">
                   <p className="text-sm text-gray-500">Email</p>
-                  <p className="font-medium">{user.email}</p>
+                  <p className="font-medium text-gray-800">{user.email}</p>
                 </div>
-                <div className="p-3 bg-gray-50 rounded-lg">
+                <div className="p-3 rounded-lg">
                   <p className="text-sm text-gray-500">Âge</p>
-                  <p className="font-medium">{profile.age || 'Non défini'}</p>
+                  <p className="font-medium text-gray-800">{profile.age || 'Non défini'}</p>
                 </div>
-                <div className="p-3 bg-gray-50 rounded-lg">
+                <div className="p-3 rounded-lg">
                   <p className="text-sm text-gray-500">Méthode de paiement</p>
-                  <p className="font-medium">{profile.preferred_payment_method.replace('_', ' ').toUpperCase()}</p>
+                  <p className="font-medium text-gray-800">{profile.preferred_payment_method.replace('_', ' ').toUpperCase()}</p>
                 </div>
                 <div className="p-3 bg-blue-50 rounded-lg">
                   <p className="text-sm text-blue-500">Solde actuel</p>
@@ -370,7 +370,7 @@ export default function Profile() {
                       min="18"
                       value={editingAge}
                       onChange={(e) => setEditingAge(Number(e.target.value))}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
+                      className="w-full p-3 border text-gray-800 border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
                       required
                     />
                   </div>
@@ -379,7 +379,7 @@ export default function Profile() {
                     <select
                       value={editingPayment}
                       onChange={(e) => setEditingPayment(e.target.value)}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
+                      className="w-full p-3 border text-gray-800 border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
                       required
                     >
                       <option value="orange_money">Orange Money</option>
@@ -422,7 +422,7 @@ export default function Profile() {
                   {/* Change Email */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <h3 className="font-medium text-gray-700 flex items-center">
+                      <h3 className="font-medium text-gray-800 flex items-center">
                         <FiMail className="mr-2" /> Changer l&apos;email
                       </h3>
                       <button
@@ -439,7 +439,7 @@ export default function Profile() {
                           placeholder="Nouvel email"
                           value={newEmail}
                           onChange={(e) => setNewEmail(e.target.value)}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
+                          className="w-full p-3 text-gray-800 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
                           required
                         />
                         <button
@@ -456,7 +456,7 @@ export default function Profile() {
                   {/* Change Password */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <h3 className="font-medium text-gray-700 flex items-center">
+                      <h3 className="font-medium text-gray-800 flex items-center">
                         <FiLock className="mr-2" /> Changer le mot de passe
                       </h3>
                       <button
@@ -473,14 +473,14 @@ export default function Profile() {
                           placeholder="Mot de passe actuel"
                           value={currentPassword}
                           onChange={(e) => setCurrentPassword(e.target.value)}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
+                          className="w-full p-3 text-gray-800 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
                         />
                         <input
                           type="password"
                           placeholder="Nouveau mot de passe (≥6 caractères)"
                           value={newPassword}
                           onChange={(e) => setNewPassword(e.target.value)}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
+                          className="w-full p-3 text-gray-800 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
                           required
                         />
                         <input
@@ -488,7 +488,7 @@ export default function Profile() {
                           placeholder="Confirmer le nouveau mot de passe"
                           value={confirmPassword}
                           onChange={(e) => setConfirmPassword(e.target.value)}
-                          className="w-full p-3 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
+                          className="w-full p-3 text-gray-800 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
                           required
                         />
                         <button
@@ -527,14 +527,14 @@ export default function Profile() {
                       <button
                         type="button"
                         onClick={() => setRequestType('deposit')}
-                        className={`flex-1 py-3 rounded-lg border transition ${requestType === 'deposit' ? 'bg-green-50 border-green-500 text-green-700' : 'bg-gray-50 border-gray-300 text-gray-700'}`}
+                        className={`flex-1 py-3 rounded-lg border transition ${requestType === 'deposit' ? 'bg-green-50 border-green-500 text-green-700' : 'border-gray-300 text-gray-700'}`}
                       >
                         <FiArrowDown className="inline mr-2" /> Dépôt
                       </button>
                       <button
                         type="button"
                         onClick={() => setRequestType('withdraw')}
-                        className={`flex-1 py-3 rounded-lg border transition ${requestType === 'withdraw' ? 'bg-red-50 border-red-500 text-red-700' : 'bg-gray-50 border-gray-300 text-gray-700'}`}
+                        className={`flex-1 py-3 rounded-lg border transition ${requestType === 'withdraw' ? 'bg-red-50 border-red-500 text-red-700' : 'border-gray-300 text-gray-700'}`}
                       >
                         <FiArrowUp className="inline mr-2" /> Retrait
                       </button>
@@ -548,12 +548,12 @@ export default function Profile() {
                       step="0.01"
                       value={amount}
                       onChange={(e) => setAmount(Number(e.target.value))}
-                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
+                      className="w-full p-3 border border-gray-300 text-gray-800 rounded-lg focus:ring-[#0072CE] focus:border-[#0072CE]"
                       required
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Raison (optionnel)</label>
+                    <label className="block text-sm font-medium text-gray-800 mb-1">Raison (optionnel)</label>
                     <textarea
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
@@ -603,14 +603,14 @@ export default function Profile() {
                   ) : (
                     <div className="space-y-3">
                       {transactions.map((trans) => (
-                        <div key={trans.id} className="p-4 bg-gray-50 rounded-lg">
+                        <div key={trans.id} className="p-4 rounded-lg">
                           <div className="flex justify-between items-start mb-2">
                             <div>
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(trans.status)}`}>
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-gray-800 text-xs font-medium ${getStatusColor(trans.status)}`}>
                                 {getStatusIcon(trans.status)}
                                 {trans.status === 'pending' ? 'En attente' : trans.status === 'completed' ? 'Complété' : 'Annulé'}
                               </span>
-                              <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${trans.request_type === 'deposit' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                              <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-gray-800 text-xs font-medium ${trans.request_type === 'deposit' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                 {trans.request_type === 'deposit' ? 'Dépôt' : 'Retrait'}
                               </span>
                             </div>
@@ -630,7 +630,7 @@ export default function Profile() {
                             </div>
                             <div className="text-right">
                               <p className="text-xs text-gray-500">Solde avant</p>
-                              <p className="text-sm font-medium">{trans.balance_before.toFixed(2)} CDF</p>
+                              <p className="text-sm font-medium text-gray-800">{trans.balance_before.toFixed(2)} CDF</p>
                             </div>
                           </div>
                         </div>

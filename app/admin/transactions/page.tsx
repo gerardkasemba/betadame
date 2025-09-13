@@ -1,24 +1,10 @@
 'use client';
 import { useSupabase } from '@/lib/supabase-client';
 import { useEffect, useState } from 'react';
-import { Transaction } from '@/types';
+import { Transaction, RawTransaction } from '@/types';
 
 const ADMIN_USER_ID = 'a9f80596-2373-4343-bdfa-8b9c0eee84c4';
 type TransactionStatus = "pending" | "completed" | "canceled";
-
-// Type for the raw Supabase response (before transformation)
-interface RawTransaction {
-  id: number;
-  user_id: string;
-  balance_before: number;
-  request_type: 'deposit' | 'withdraw';
-  amount: number;
-  status: TransactionStatus;
-  reason: string | null;
-  created_at: string;
-  processed_at: string | null;
-  users: { email: string }[];
-}
 
 export default function AdminTransactions() {
   const { supabase } = useSupabase();
@@ -62,7 +48,7 @@ export default function AdminTransactions() {
 
           if (transError) throw transError;
 
-          // Transform data to include user_email
+          // Transform data to include user_email with null safety
           const transformedData = transData?.map((trans: RawTransaction) => ({
             id: trans.id,
             user_id: trans.user_id,
@@ -98,8 +84,13 @@ export default function AdminTransactions() {
     e.preventDefault();
     setUpdating(transactionId);
     try {
-      const newStatus = statusUpdates[transactionId] || transactions.find((t) => t.id === transactionId)?.status;
-      const newReason = reasonUpdates[transactionId] || transactions.find((t) => t.id === transactionId)?.reason || null;
+      const transaction = transactions.find((t) => t.id === transactionId);
+      if (!transaction) {
+        throw new Error('Transaction non trouvée');
+      }
+
+      const newStatus = statusUpdates[transactionId] || transaction.status;
+      const newReason = reasonUpdates[transactionId] || transaction.reason || null;
 
       const { error } = await supabase
         .from('transactions')
@@ -109,17 +100,17 @@ export default function AdminTransactions() {
       if (error) throw error;
 
       // Update local state
-        setTransactions((prev) =>
+      setTransactions((prev) =>
         prev.map((trans) =>
-            trans.id === transactionId
+          trans.id === transactionId
             ? {
                 ...trans,
-                status: newStatus as TransactionStatus, // cast to union type
-                reason: newReason ?? null, // ensure not undefined
-                }
+                status: newStatus as TransactionStatus,
+                reason: newReason,
+              }
             : trans
         )
-        );
+      );
       
       // Clear the update states
       setStatusUpdates(prev => {
@@ -162,7 +153,7 @@ export default function AdminTransactions() {
 
   if (loading) {
     return (
-      <div className="bg-gray-50 flex items-center justify-center">
+      <div className="flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0072CE] mx-auto"></div>
           <p className="mt-4 text-gray-600">Chargement des transactions...</p>
@@ -171,11 +162,23 @@ export default function AdminTransactions() {
     );
   }
 
-  if (!user || user.id !== ADMIN_USER_ID) {
+  if (!user) {
     return (
-      <div className="bg-gray-50 flex items-center justify-center p-4">
+      <div className="flex items-center justify-center p-4">
         <div className="bg-white rounded-xl shadow-md p-6 max-w-md w-full text-center">
-          <div className="text-congoleseRed text-5xl mb-4">⛔</div>
+          <div className="text-[#CE1126] text-5xl mb-4">⛔</div>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Non connecté</h1>
+          <p className="text-gray-600">Veuillez vous connecter pour accéder à cette page.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (user.id !== ADMIN_USER_ID) {
+    return (
+      <div className="flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-md p-6 max-w-md w-full text-center">
+          <div className="text-[#CE1126] text-5xl mb-4">⛔</div>
           <h1 className="text-2xl font-bold text-gray-800 mb-2">Accès Refusé</h1>
           <p className="text-gray-600">Cette page est réservée à l&apos;administrateur.</p>
         </div>
@@ -184,7 +187,7 @@ export default function AdminTransactions() {
   }
 
   return (
-    <div className="bg-gray-50 p-4 md:p-6">
+    <div className="p-4 md:p-6">
       <div className="max-w-4xl mx-auto">
         <div className="mb-6 md:mb-8">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-800">Gestion des Transactions</h1>
@@ -265,7 +268,7 @@ export default function AdminTransactions() {
                     <tr key={trans.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">{trans.user_email}</div>
-                        <div className="text-sm text-gray-500">Solde avant: {trans.balance_before.toFixed(2)} CDF</div>
+                        <div className="text-sm text-gray-500">Solde avant: {trans.balance_before?.toFixed(2) || '0.00'} CDF</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getRequestTypeColor(trans.request_type)}`}>
@@ -273,7 +276,7 @@ export default function AdminTransactions() {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{trans.amount.toFixed(2)} CDF</div>
+                        <div className="text-sm font-medium text-gray-900">{trans.amount?.toFixed(2) || '0.00'} CDF</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusColor(trans.status)}`}>
@@ -350,12 +353,12 @@ export default function AdminTransactions() {
                     </div>
                     <div>
                       <div className="text-xs text-gray-500">Montant</div>
-                      <div className="font-medium">{trans.amount.toFixed(2)} CDF</div>
+                      <div className="font-medium">{trans.amount?.toFixed(2) || '0.00'} CDF</div>
                     </div>
                   </div>
                   
                   <div className="text-sm mb-3">
-                    <div className="text-gray-500">Solde avant: {trans.balance_before.toFixed(2)} CDF</div>
+                    <div className="text-gray-500">Solde avant: {trans.balance_before?.toFixed(2) || '0.00'} CDF</div>
                     {trans.reason && (
                       <div className="text-gray-700 mt-1">Raison: {trans.reason}</div>
                     )}

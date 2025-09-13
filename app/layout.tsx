@@ -26,7 +26,7 @@ export default function RootLayout({
       <body className="bg-white text-[#222]">
         <SupabaseProvider>
           <Navbar />
-          <main className="container mx-auto pb-36 md:pb-4">
+          <main className="mx-auto pb-36 md:pb-4 bg-white">
             {children}
           </main>
           <ToastContainer />

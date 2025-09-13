@@ -18,6 +18,21 @@ export default function ResetPassword() {
   const { supabase } = useSupabase();
   const router = useRouter();
   // const searchParams = useSearchParams();
+
+    // Check if user is already logged in
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        // Redirect to lobby or intended destination
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirectTo = urlParams.get('redirectTo') || '/lobby';
+        router.push(redirectTo);
+      }
+    };
+    
+    checkSession();
+  }, [supabase, router]);
   
   const [password, setPassword] = useState('');
   const [repeatPassword, setRepeatPassword] = useState('');

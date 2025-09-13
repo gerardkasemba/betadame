@@ -11,14 +11,18 @@ import {
   FiUserPlus, 
   FiLogOut,
   FiMenu,
-  FiX
+  FiX,
+  FiSettings
 } from 'react-icons/fi';
+
+const ADMIN_USER_ID = 'a9f80596-2373-4343-bdfa-8b9c0eee84c4';
 
 export function Navbar() {
   const { supabase } = useSupabase();
   const router = useRouter();
   const pathname = usePathname();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -26,11 +30,25 @@ export function Navbar() {
     const checkAuth = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setIsAuthenticated(!!user);
+      // Check if user is admin
+      if (user && user.id === ADMIN_USER_ID) {
+        setIsAdmin(true);
+      } else {
+        setIsAdmin(false);
+      }
     };
     checkAuth();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      setIsAuthenticated(!!session?.user);
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const isLoggedIn = !!session?.user;
+      setIsAuthenticated(isLoggedIn);
+      
+      // Check if user is admin when auth state changes
+      if (isLoggedIn && session.user && session.user.id === ADMIN_USER_ID) {
+        setIsAdmin(true);
+      } else {
+        setIsAdmin(false);
+      }
     });
 
     const handleScroll = () => {
@@ -47,6 +65,7 @@ export function Navbar() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setIsAuthenticated(false);
+    setIsAdmin(false);
     router.push('/auth/login');
     setIsMobileMenuOpen(false);
   };
@@ -96,6 +115,23 @@ export function Navbar() {
                 isActiveLink('/lobby') ? 'w-full' : 'w-0 group-hover:w-full'
               }`}></span>
             </Link>
+
+            {isAuthenticated && isAdmin && (
+              <Link 
+                href="/admin" 
+                className={`flex items-center transition-all duration-200 group relative ${
+                  isActiveLink('/admin') 
+                    ? 'text-yellow-500 font-semibold' 
+                    : 'text-white hover:text-yellow-400'
+                }`}
+              >
+                <FiSettings className="mr-1 group-hover:scale-110 transition-transform" /> 
+                <span>Admin</span>
+                <span className={`absolute -bottom-1 left-0 h-0.5 bg-yellow-500 transition-all ${
+                  isActiveLink('/admin') ? 'w-full' : 'w-0 group-hover:w-full'
+                }`}></span>
+              </Link>
+            )}
 
             {isAuthenticated ? (
               <>
@@ -154,7 +190,7 @@ export function Navbar() {
       </nav>
 
       {/* Spacer for desktop navbar */}
-      <div className="h-24 md:block hidden"></div>
+      <div className="h-22 md:block hidden"></div>
 
       {/* Mobile Top Navigation */}
       <nav className="md:hidden fixed top-0 left-0 right-0 bg-crystalBlue-800 text-white z-50 shadow-md">
@@ -199,6 +235,21 @@ export function Navbar() {
                 <FiHome className="mr-3" /> 
                 <span>Lobby</span>
               </Link>
+
+              {isAuthenticated && isAdmin && (
+                <Link 
+                  href="/admin" 
+                  className={`flex items-center transition-all duration-200 py-2 ${
+                    isActiveLink('/admin') 
+                      ? 'text-yellow-500 font-semibold bg-blue-900/30 rounded-lg px-3' 
+                      : 'text-white hover:text-yellow-400'
+                  }`}
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <FiSettings className="mr-3" /> 
+                  <span>Admin</span>
+                </Link>
+              )}
 
               {isAuthenticated ? (
                 <>
@@ -254,7 +305,7 @@ export function Navbar() {
       </nav>
 
       {/* Spacer for mobile navbar */}
-      <div className="h-24 md:hidden"></div>
+      <div className="h-22 md:hidden"></div>
 
       <style jsx>{`
         .bg-crystalBlue-800 {

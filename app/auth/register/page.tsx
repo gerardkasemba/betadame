@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSupabase } from '@/lib/supabase-client';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -32,110 +32,125 @@ export default function Register() {
   const [showPassword, setShowPassword] = useState(false);
   const [showRepeatPassword, setShowRepeatPassword] = useState(false);
 
-const handleRegister = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setLoading(true);
-  setError(null);
-  setSuccess(null);
+    // Check if user is already logged in
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        // Redirect to lobby or intended destination
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirectTo = urlParams.get('redirectTo') || '/lobby';
+        router.push(redirectTo);
+      }
+    };
+    
+    checkSession();
+  }, [supabase, router]);
 
-  // Validate inputs
-  if (password !== repeatPassword) {
-    setError('Les mots de passe ne correspondent pas.');
-    setLoading(false);
-    return;
-  }
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
 
-  if (age === '' || Number(age) < 18) {
-    setError('Vous devez avoir au moins 18 ans pour jouer.');
-    setLoading(false);
-    return;
-  }
-
-  if (!email || !password || !paymentMethod) {
-    setError('Veuillez remplir tous les champs.');
-    setLoading(false);
-    return;
-  }
-
-  try {
-    // Sign up the user with Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          age: Number(age),
-          preferred_payment_method: paymentMethod,
-        },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-
-    if (authError) {
-      setError('Erreur d\'inscription : ' + authError.message);
+    // Validate inputs
+    if (password !== repeatPassword) {
+      setError('Les mots de passe ne correspondent pas.');
       setLoading(false);
       return;
     }
 
-    if (authData.user) {
-      console.log('Authenticated user:', authData.user);
+    if (age === '' || Number(age) < 18) {
+      setError('Vous devez avoir au moins 18 ans pour jouer.');
+      setLoading(false);
+      return;
+    }
 
-      // Insert or update the user profile
-      const { error: insertError } = await supabase
-        .from('users')
-        .upsert(
-          {
-            id: authData.user.id,
-            email: authData.user.email,
+    if (!email || !password || !paymentMethod) {
+      setError('Veuillez remplir tous les champs.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Sign up the user with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
             age: Number(age),
             preferred_payment_method: paymentMethod,
           },
-          {
-            onConflict: 'id',
-            ignoreDuplicates: false,
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      });
+
+      if (authError) {
+        setError('Erreur d\'inscription : ' + authError.message);
+        setLoading(false);
+        return;
+      }
+
+      if (authData.user) {
+        console.log('Authenticated user:', authData.user);
+
+        // Insert or update the user profile
+        const { error: insertError } = await supabase
+          .from('users')
+          .upsert(
+            {
+              id: authData.user.id,
+              email: authData.user.email,
+              age: Number(age),
+              preferred_payment_method: paymentMethod,
+            },
+            {
+              onConflict: 'id',
+              ignoreDuplicates: false,
+            }
+          );
+
+        if (insertError) {
+          console.error('Profile creation failed:', insertError);
+          setError(`Erreur lors de la création du profil : ${insertError.message}`);
+          if (insertError.code === '23505') {
+            console.log('User profile already exists');
           }
-        );
-
-      if (insertError) {
-        console.error('Profile creation failed:', insertError);
-        setError(`Erreur lors de la création du profil : ${insertError.message}`);
-        if (insertError.code === '23505') {
-          console.log('User profile already exists');
+          // Continue with registration even if profile creation fails
+          console.warn('User auth succeeded but profile creation failed. User can complete profile later.');
         }
-        // Continue with registration even if profile creation fails
-        console.warn('User auth succeeded but profile creation failed. User can complete profile later.');
-      }
 
-      // Check if email confirmation is required
-      if (authData.user.identities && authData.user.identities.length === 0) {
-        setError('Cet email est déjà utilisé.');
+        // Check if email confirmation is required
+        if (authData.user.identities && authData.user.identities.length === 0) {
+          setError('Cet email est déjà utilisé.');
+          setLoading(false);
+          return;
+        }
+
+        if (!authData.session) {
+          // Email confirmation required
+          setSuccess('Veuillez vérifier votre email pour activer votre compte. Un lien de confirmation a été envoyé.');
+          setLoading(false);
+          return;
+        }
+
+        // Redirect to lobby if auto-confirm is enabled
+        router.push('/lobby');
+      } else {
+        setError('Erreur : utilisateur non créé.');
         setLoading(false);
-        return;
       }
-
-      if (!authData.session) {
-        // Email confirmation required
-        setSuccess('Veuillez vérifier votre email pour activer votre compte. Un lien de confirmation a été envoyé.');
-        setLoading(false);
-        return;
+    } catch (err: unknown) {
+      console.error('Unexpected error:', err);
+      if (err instanceof Error) {
+        setError('Erreur inattendue : ' + err.message);
+      } else {
+        setError('Une erreur inattendue s\'est produite.');
       }
-
-      // Redirect to lobby if auto-confirm is enabled
-      router.push('/lobby');
-    } else {
-      setError('Erreur : utilisateur non créé.');
       setLoading(false);
     }
-  } catch (err: unknown) {
-    console.error('Unexpected error:', err);
-    if (err instanceof Error) {
-      setError('Erreur inattendue : ' + err.message);
-    } else {
-      setError('Une erreur inattendue s\'est produite.');
-    }
-    setLoading(false);
-  }
-};
+  };
 
   return (
     <div className="flex items-center justify-center p-4">

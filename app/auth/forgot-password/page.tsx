@@ -1,7 +1,8 @@
 'use client';
-import { useState } from 'react';
-import { useSupabase } from '@/lib/supabase-client';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useSupabase } from '@/lib/supabase-client';
+import { useRouter } from 'next/navigation';
 import { 
   FiMail, 
   FiArrowRight,
@@ -12,10 +13,26 @@ import {
 
 export default function ForgotPassword() {
   const { supabase } = useSupabase();
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+    // Check if user is already logged in
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        // Redirect to lobby or intended destination
+        const urlParams = new URLSearchParams(window.location.search);
+        const redirectTo = urlParams.get('redirectTo') || '/lobby';
+        router.push(redirectTo);
+      }
+    };
+    
+    checkSession();
+  }, [supabase, router]);
 
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();

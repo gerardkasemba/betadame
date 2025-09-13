@@ -49,6 +49,17 @@ export interface Transaction {
   processed_at: string | null;
 }
 
-
+export interface RawTransaction {
+  id: number;
+  user_id: string;
+  balance_before: number;
+  request_type: "deposit" | "withdraw";
+  amount: number;
+  status: "pending" | "completed" | "canceled";
+  reason: string | null;
+  created_at: string;
+  processed_at: string | null;
+  users: { email: string }[];  //
+}
 
 export type Board = (Piece | null)[][];
