@@ -257,7 +257,7 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0072CE] mx-auto"></div>
           <p className="mt-4 text-gray-600">Chargement de votre profil...</p>
@@ -267,8 +267,8 @@ export default function Profile() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 md:p-6">
-      <div className="max-w-2xl mx-auto">
+    <div className="bg-gray-50 p-4 md:p-6">
+      <div className="max-w-4xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center">
             <FiUser className="mr-2" /> Votre Profil
