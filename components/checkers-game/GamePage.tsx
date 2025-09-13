@@ -293,7 +293,7 @@ export default function GamePage({ game }: { game: Game }) {
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
-      <main className="bg-white rounded-lg shadow-lg w-full max-w-4xl p-6">
+      <main className="w-full max-w-4xl p-6">
         <GameHeader
           playerRole={playerRole}
           opponentEmail={opponentEmail}
