@@ -8,9 +8,10 @@ interface GameStatsProps {
   player2Id: string | null;
   playerEmails: { [key: string]: string };
   isComputerMode: boolean; // From hook
+  gameStatus: string;
 }
 
-export default function GameStats({ player1Id, player2Id, playerEmails, isComputerMode }: GameStatsProps) {
+export default function GameStats({ player1Id, player2Id, playerEmails, isComputerMode, gameStatus }: GameStatsProps) {
   const { supabase } = useSupabase();
   const [wins, setWins] = useState<{ player1: number; player2: number }>({ player1: 0, player2: 0 });
 

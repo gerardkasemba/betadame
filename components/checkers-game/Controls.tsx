@@ -5,9 +5,10 @@ interface ControlsProps {
   onReset: () => void;
   onResign?: () => void;
   disabled: boolean;
+  showResign?: boolean;
 }
 
-const Controls: React.FC<ControlsProps> = ({ onResign, disabled }) => {
+const Controls: React.FC<ControlsProps> = ({ onResign, disabled, showResign = false }) => {
   return (
     <div className="mt-4 flex justify-center space-x-4">
       {/* <button
@@ -19,7 +20,7 @@ const Controls: React.FC<ControlsProps> = ({ onResign, disabled }) => {
       >
         Réinitialiser
       </button> */}
-      {onResign && (
+      {showResign && onResign && (
         <button
           onClick={onResign}
           disabled={disabled}

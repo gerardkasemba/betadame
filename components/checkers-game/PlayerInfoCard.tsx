@@ -12,6 +12,7 @@ interface PlayerInfoCardProps {
   onJoin: () => void;
   showJoinButton: boolean;
   isComputerMode: boolean;
+  gameStatus: string;
 }
 
 export default function PlayerInfoCard({
@@ -23,7 +24,8 @@ export default function PlayerInfoCard({
   waitingTime,
   onJoin,
   showJoinButton,
-  // isComputerMode,
+  isComputerMode,
+  gameStatus,
 }: PlayerInfoCardProps) {
   return (
     <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-md p-6 shadow-sm border border-blue-100 mb-6">

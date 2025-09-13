@@ -3,7 +3,7 @@ import type * as Party from 'partykit/server';
 
 // Define types for our game messages
 interface GameMessage {
-  type: 'move' | 'timeout' | 'resign' | 'opponent_active' | 'player_joined' | 'error';
+  type: 'move' | 'timeout' | 'resign' | 'opponent_active' | 'player_joined' | 'error' | 'connected';
   game_id?: string;
   board?: (string | null)[];
   currentPlayer?: 'white' | 'black';
@@ -39,20 +39,28 @@ interface ClientMessage {
   };
 }
 
-// Supabase client for server-side operations
+// Enhanced Supabase client for server-side operations
 const createSupabaseClient = (url: string, key: string) => {
   return {
     from: (table: string) => ({
-      select: (columns: string) => ({
+      select: (columns: string = '*') => ({
         eq: (column: string, value: any) => ({
           single: async () => {
-            const response = await fetch(`${url}/rest/v1/${table}?${column}=eq.${value}&select=${columns}`, {
-              headers: {
-                'apikey': key,
-                'Authorization': `Bearer ${key}`,
-                'Content-Type': 'application/json'
+            const response = await fetch(
+              `${url}/rest/v1/${table}?${column}=eq.${value}&select=${columns}`,
+              {
+                headers: {
+                  'apikey': key,
+                  'Authorization': `Bearer ${key}`,
+                  'Content-Type': 'application/json'
+                }
               }
-            });
+            );
+            
+            if (!response.ok) {
+              throw new Error(`Supabase query failed: ${response.statusText}`);
+            }
+            
             return response.json();
           }
         })
@@ -60,16 +68,24 @@ const createSupabaseClient = (url: string, key: string) => {
       update: (data: any) => ({
         eq: (column: string, value: any) => ({
           select: async () => {
-            const response = await fetch(`${url}/rest/v1/${table}?${column}=eq.${value}`, {
-              method: 'PATCH',
-              headers: {
-                'apikey': key,
-                'Authorization': `Bearer ${key}`,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=representation'
-              },
-              body: JSON.stringify(data)
-            });
+            const response = await fetch(
+              `${url}/rest/v1/${table}?${column}=eq.${value}`,
+              {
+                method: 'PATCH',
+                headers: {
+                  'apikey': key,
+                  'Authorization': `Bearer ${key}`,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=representation'
+                },
+                body: JSON.stringify(data)
+              }
+            );
+            
+            if (!response.ok) {
+              throw new Error(`Supabase update failed: ${response.statusText}`);
+            }
+            
             return response.json();
           }
         })
@@ -77,15 +93,23 @@ const createSupabaseClient = (url: string, key: string) => {
     }),
     rpc: (fn: string, params: any) => ({
       select: async () => {
-        const response = await fetch(`${url}/rest/v1/rpc/${fn}`, {
-          method: 'POST',
-          headers: {
-            'apikey': key,
-            'Authorization': `Bearer ${key}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(params)
-        });
+        const response = await fetch(
+          `${url}/rest/v1/rpc/${fn}`,
+          {
+            method: 'POST',
+            headers: {
+              'apikey': key,
+              'Authorization': `Bearer ${key}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(params)
+          }
+        );
+        
+        if (!response.ok) {
+          throw new Error(`Supabase RPC failed: ${response.statusText}`);
+        }
+        
         return response.json();
       }
     })
@@ -93,8 +117,8 @@ const createSupabaseClient = (url: string, key: string) => {
 };
 
 export default class CheckersServer implements Party.Server {
-  // Store connections by game ID and user ID
-  private connections: Map<string, Party.Connection[]> = new Map();
+  // Store connections by game ID
+  private connections: Map<string, Set<Party.Connection>> = new Map();
   private supabase: any;
 
   constructor(readonly party: Party.Party) {
@@ -121,9 +145,9 @@ export default class CheckersServer implements Party.Server {
 
     // Store connection by game ID
     if (!this.connections.has(gameId)) {
-      this.connections.set(gameId, []);
+      this.connections.set(gameId, new Set());
     }
-    this.connections.get(gameId)!.push(connection);
+    this.connections.get(gameId)!.add(connection);
 
     // Send welcome message with game ID
     connection.send(JSON.stringify({
@@ -131,22 +155,21 @@ export default class CheckersServer implements Party.Server {
       game_id: gameId
     }));
 
-    console.log(`Client connected to game ${gameId}`);
+    console.log(`Client ${connection.id} connected to game ${gameId}`);
   }
 
   onClose(connection: Party.Connection) {
     // Remove connection from all games
     for (const [gameId, connections] of this.connections.entries()) {
-      const index = connections.indexOf(connection);
-      if (index > -1) {
-        connections.splice(index, 1);
+      if (connections.has(connection)) {
+        connections.delete(connection);
         
         // If no more connections for this game, clean up
-        if (connections.length === 0) {
+        if (connections.size === 0) {
           this.connections.delete(gameId);
         }
         
-        console.log(`Client disconnected from game ${gameId}`);
+        console.log(`Client ${connection.id} disconnected from game ${gameId}`);
         break;
       }
     }
@@ -161,6 +184,16 @@ export default class CheckersServer implements Party.Server {
         connection.send(JSON.stringify({
           type: 'error',
           message: 'Game ID is required'
+        }));
+        return;
+      }
+
+      // Verify the connection is part of this game
+      if (!this.connections.has(data.game_id) || 
+          !this.connections.get(data.game_id)!.has(connection)) {
+        connection.send(JSON.stringify({
+          type: 'error',
+          message: 'Not connected to this game'
         }));
         return;
       }
@@ -213,6 +246,25 @@ export default class CheckersServer implements Party.Server {
         return;
       }
 
+      // Update game state in Supabase if needed
+      if (data.status === 'finished') {
+        try {
+          await this.supabase
+            .from('games')
+            .update({
+              board: data.board,
+              current_player: data.currentPlayer,
+              status: data.status,
+              winner_id: data.winner_id,
+              last_move_at: data.last_move_at || new Date().toISOString()
+            })
+            .eq('id', data.game_id)
+            .select();
+        } catch (error) {
+          console.error('Error updating game state:', error);
+        }
+      }
+
       // Broadcast move to all clients in the same game
       this.broadcastToGame(data.game_id!, JSON.stringify({
         type: 'move',
@@ -250,6 +302,21 @@ export default class CheckersServer implements Party.Server {
         return;
       }
 
+      // Update game state in Supabase
+      try {
+        await this.supabase
+          .from('games')
+          .update({
+            board: data.board,
+            current_player: data.currentPlayer,
+            last_move_at: data.last_move_at || new Date().toISOString()
+          })
+          .eq('id', data.game_id)
+          .select();
+      } catch (error) {
+        console.error('Error updating game state:', error);
+      }
+
       // Broadcast timeout to all clients in the same game
       this.broadcastToGame(data.game_id!, JSON.stringify({
         type: 'timeout',
@@ -275,6 +342,20 @@ export default class CheckersServer implements Party.Server {
 
   private async handleResign(data: ClientMessage, connection: Party.Connection) {
     try {
+      // Update game state in Supabase
+      try {
+        await this.supabase
+          .from('games')
+          .update({
+            status: 'finished',
+            winner_id: data.winner_id
+          })
+          .eq('id', data.game_id)
+          .select();
+      } catch (error) {
+        console.error('Error updating game state:', error);
+      }
+
       // Broadcast resignation to all clients in the same game
       this.broadcastToGame(data.game_id!, JSON.stringify({
         type: 'resign',
@@ -339,7 +420,13 @@ export default class CheckersServer implements Party.Server {
     if (connections) {
       connections.forEach(conn => {
         if (!senderId || conn.id !== senderId) {
-          conn.send(message);
+          try {
+            conn.send(message);
+          } catch (error) {
+            console.error('Error sending message to connection:', error);
+            // Remove broken connection
+            connections.delete(conn);
+          }
         }
       });
     }
@@ -355,7 +442,7 @@ export default class CheckersServer implements Party.Server {
         // Fetch game state from Supabase
         const { data, error } = await this.supabase
           .from('games')
-          .select('id, board, current_player, status, winner_id, last_move_at, player1_id, player2_id, stake')
+          .select('id, board, current_player, status, winner_id, last_move_at, player1_id, player2_id, stake, created_at')
           .eq('id', gameId)
           .single();
 
@@ -373,7 +460,7 @@ export default class CheckersServer implements Party.Server {
         return new Response(JSON.stringify({
           id: data.id,
           board: data.board,
-          currentPlayer: data.current_player,
+          current_player: data.current_player,
           redPieces,
           blackPieces,
           status: data.status,
@@ -381,22 +468,44 @@ export default class CheckersServer implements Party.Server {
           last_move_at: data.last_move_at,
           player1_id: data.player1_id,
           player2_id: data.player2_id,
-          stake: data.stake
+          stake: data.stake,
+          created_at: data.created_at
         }), {
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS'
+          }
         });
 
       } catch (error) {
         return new Response(JSON.stringify({ error: 'Failed to fetch game state' }), {
           status: 500,
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          }
         });
       }
     }
 
+    // Handle OPTIONS for CORS
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        }
+      });
+    }
+
     return new Response(JSON.stringify({ message: 'Not found' }), {
       status: 404,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
     });
   }
 }

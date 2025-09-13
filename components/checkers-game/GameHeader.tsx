@@ -17,24 +17,31 @@ interface GameHeaderProps {
   player2Id: string | null;
   playerEmails: { [key: string]: string };
   isComputerMode: boolean;
+  gameStatus: string;
 }
 
 export default function GameHeader(props: GameHeaderProps) {
-  const { player1Id, player2Id, playerEmails, isComputerMode, ...infoProps } = props;
+  const { player1Id, player2Id, playerEmails, isComputerMode, gameStatus, ...infoProps } = props;
 
   return (
     <div>
       {/* Stats: Trophies */}
-      <GameStats player1Id={player1Id} player2Id={player2Id} playerEmails={playerEmails} isComputerMode={isComputerMode} />
+      <GameStats 
+        player1Id={player1Id} 
+        player2Id={player2Id} 
+        playerEmails={playerEmails} 
+        isComputerMode={isComputerMode} 
+        gameStatus={gameStatus}
+      />
 
       {/* Desktop */}
       <div className="hidden md:block">
-        <PlayerInfoCard {...infoProps} isComputerMode={isComputerMode} />
+        <PlayerInfoCard {...infoProps} isComputerMode={isComputerMode} gameStatus={gameStatus} />
       </div>
 
       {/* Mobile */}
       <div className="md:hidden">
-        <MobileGameFooter {...infoProps} isComputerMode={isComputerMode} />
+        <MobileGameFooter {...infoProps} isComputerMode={isComputerMode} gameStatus={gameStatus} />
       </div>
     </div>
   );

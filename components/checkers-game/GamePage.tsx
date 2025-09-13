@@ -36,31 +36,31 @@ export default function GamePage({ game }: { game: Game }) {
   const [playerEmails, setPlayerEmails] = useState<{ [key: string]: string }>({});
   const [gameData, setGameData] = useState<Game>(game);
   const [isLoading, setIsLoading] = useState(true);
-  const [waitingTime, setWaitingTime] = useState<number | undefined>(undefined); // For countdown
+  const [waitingTime, setWaitingTime] = useState<number | undefined>(undefined);
+  const [hasGameStarted, setHasGameStarted] = useState(game.status === 'active');
 
   // Fetch user and emails
   useEffect(() => {
     const fetchUserAndEmails = async () => {
       setIsLoading(true);
 
-      // get logged in user
+      // Get logged in user
       const {
         data: { user },
       } = await supabase.auth.getUser();
       setUserId(user?.id || null);
 
-      // collect both players' ids
+      // Collect both players' ids
       const playerIds = [gameData.player1_id, gameData.player2_id].filter(Boolean) as string[];
 
       if (playerIds.length > 0) {
-        // query users table
+        // Query users table
         const { data } = await supabase
           .from("users")
           .select("id, email")
           .in("id", playerIds);
 
         if (data) {
-          // ✅ no more "any"
           const emails = data.reduce<Record<string, string>>((acc, user) => {
             acc[user.id] = user.email ?? "";
             return acc;
@@ -71,12 +71,16 @@ export default function GamePage({ game }: { game: Game }) {
       }
 
       setIsLoading(false);
-      initializeBoard();
+      
+      // Initialize board only if game is active
+      if (gameData.status === 'active') {
+        initializeBoard();
+        setHasGameStarted(true);
+      }
     };
 
     fetchUserAndEmails();
   }, [supabase, gameData.player1_id, gameData.player2_id, initializeBoard]);
-
 
   // Waiting Timer (60s countdown when open and no p2)
   useEffect(() => {
@@ -93,30 +97,47 @@ export default function GamePage({ game }: { game: Game }) {
       setWaitingTime(remaining);
 
       if (remaining > 0) {
-        const interval = setInterval(updateTimer, 1000);
-        return () => clearInterval(interval);
+        setTimeout(updateTimer, 1000);
       }
     };
     updateTimer();
   }, [gameStatus, gameData.created_at, gameData.player2_id]);
 
-  // Re-init board on gameData change (e.g., p2 join)
+  // Initialize board when game becomes active
   useEffect(() => {
-    if (!isLoading) initializeBoard();
-  }, [gameData, initializeBoard, isLoading]);
+    if (gameData.status === 'active' && !hasGameStarted) {
+      initializeBoard();
+      setHasGameStarted(true);
+      
+      // Show game started notification
+      if (userId && (userId === gameData.player1_id || userId === gameData.player2_id)) {
+        toast.info('La partie a commencé !', { 
+          toastId: 'game-started',
+          autoClose: 3000
+        });
+      }
+    }
+  }, [gameData.status, initializeBoard, hasGameStarted, userId, gameData.player1_id, gameData.player2_id]);
 
-  // Real-time subscription (unchanged, but triggers gameData update -> board refresh)
+  // Real-time subscription for game updates
   useEffect(() => {
     const channel = supabase
       .channel(`game:${game.id}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${game.id}` },
+        { 
+          event: 'UPDATE', 
+          schema: 'public', 
+          table: 'games', 
+          filter: `id=eq.${game.id}` 
+        },
         (payload) => {
           const updatedGame = payload.new as Game;
           setGameData(updatedGame);
 
+          // Handle player joining
           if (updatedGame.player2_id && updatedGame.player2_id !== gameData.player2_id) {
+            // Fetch new player's email
             supabase
               .from('users')
               .select('id, email')
@@ -125,73 +146,121 @@ export default function GamePage({ game }: { game: Game }) {
               .then(({ data }) => {
                 if (data) {
                   setPlayerEmails((prev) => ({ ...prev, [data.id]: data.email || '' }));
-                  toast.info(
-                    updatedGame.player2_id === 'a9f80596-2373-4343-bdfa-8b9c0eee84c4'
-                      ? "Vous jouez contre l'ordinateur !"
-                      : 'Votre adversaire a rejoint la partie !',
-                    { toastId: 'join-success' }
-                  );
+                  
+                  // Show appropriate join message
+                  if (updatedGame.player2_id === 'a9f80596-2373-4343-bdfa-8b9c0eee84c4') {
+                    toast.info("Vous jouez contre l'ordinateur !", { 
+                      toastId: 'computer-join',
+                      autoClose: 4000
+                    });
+                  } else {
+                    toast.info('Un adversaire a rejoint la partie !', { 
+                      toastId: 'player-join',
+                      autoClose: 4000
+                    });
+                  }
                 }
               });
 
+            // If game becomes active after player join
             if (updatedGame.status === 'active') {
-              toast.info('La partie est maintenant active !', { toastId: 'game-active' });
+              toast.info('La partie commence maintenant !', { 
+                toastId: 'game-active',
+                autoClose: 3000
+              });
             }
           }
 
+          // Handle game completion
           if (updatedGame.status === 'finished') {
-            toast.info(
-              `Partie terminée ! ${
-                updatedGame.winner_id === userId
-                  ? 'Vous avez gagné !'
-                  : 'Votre adversaire a gagné !'
-              }`,
-              { toastId: 'game-finished' }
-            );
+            let message = 'Partie terminée ! ';
+            
+            if (!updatedGame.winner_id) {
+              message += 'Match nul !';
+            } else if (updatedGame.winner_id === userId) {
+              message += 'Vous avez gagné !';
+            } else {
+              message += 'Votre adversaire a gagné !';
+            }
+            
+            toast.info(message, { 
+              toastId: 'game-finished',
+              autoClose: 5000
+            });
+          }
+
+          // Handle game status changes
+          if (updatedGame.status !== gameData.status) {
+            if (updatedGame.status === 'active') {
+              toast.info('La partie est maintenant active !', { 
+                toastId: 'game-status-active',
+                autoClose: 3000
+              });
+            } else if (updatedGame.status === 'finished') {
+              toast.info('La partie est terminée.', { 
+                toastId: 'game-status-finished',
+                autoClose: 3000
+              });
+            }
           }
         }
       )
       .subscribe();
 
-    // ✅ Cleanup must return a sync function
     return () => {
-      supabase.removeChannel(channel); // no await here
+      supabase.removeChannel(channel);
     };
-  }, [supabase, game.id, gameData.player2_id, userId]);
+  }, [supabase, game.id, gameData.player2_id, gameData.status, userId]);
 
-
-  // Error/Opponent toasts (unchanged)
+  // Error notifications
   useEffect(() => {
     if (error) {
-      toast.error(error, { toastId: 'error' });
-      const timer = setTimeout(() => toast.dismiss('error'), 5000);
-      return () => clearTimeout(timer);
+      toast.error(error, { 
+        toastId: 'error',
+        autoClose: 5000
+      });
     }
   }, [error]);
 
+  // Opponent activity notifications
   useEffect(() => {
     if (opponentActivity) {
-      toast.info(opponentActivity, { toastId: 'opponent-activity' });
-      const timer = setTimeout(() => toast.dismiss('opponent-activity'), 3000);
-      return () => clearTimeout(timer);
+      toast.info(opponentActivity, { 
+        toastId: 'opponent-activity',
+        autoClose: 3000
+      });
     }
   }, [opponentActivity]);
 
   const handleJoinGame = async () => {
     if (!userId || gameData.player1_id === userId || gameData.player2_id) {
-      toast.error('Vous ne pouvez pas rejoindre cette partie.', { toastId: 'join-error' });
+      toast.error('Vous ne pouvez pas rejoindre cette partie.', { 
+        toastId: 'join-error',
+        autoClose: 4000
+      });
       return;
     }
+    
     if (gameStatus !== 'open') {
-      toast.error('Cette partie n’est pas ouverte.', { toastId: 'join-error' });
+      toast.error('Cette partie n\'est pas ouverte.', { 
+        toastId: 'join-error',
+        autoClose: 4000
+      });
       return;
     }
 
     try {
       await joinGame();
-      toast.success('Partie rejointe avec succès !', { toastId: 'join-success' });
+      toast.success('Vous avez rejoint la partie !', { 
+        toastId: 'join-success',
+        autoClose: 3000
+      });
     } catch (error) {
-      toast.error('Erreur lors de la jointure : ' + (error as Error).message, { toastId: 'join-error' });
+      const errorMessage = (error as Error).message;
+      toast.error(`Erreur lors de la jointure: ${errorMessage}`, { 
+        toastId: 'join-error',
+        autoClose: 5000
+      });
     }
   };
 
@@ -199,24 +268,32 @@ export default function GamePage({ game }: { game: Game }) {
   const isPlayer2 = userId === gameData.player2_id;
   const isYourTurn = (isPlayer1 && currentPlayer === 'black') || (isPlayer2 && currentPlayer === 'red');
   const playerRole = isPlayer1 ? 'black' : isPlayer2 ? 'red' : 'spectator';
+  
   const opponentEmail = isPlayer1
-    ? (gameData.player2_id === 'a9f80596-2373-4343-bdfa-8b9c0eee84c4' ? 'Ordinateur' : playerEmails[gameData.player2_id || ''] || 'En attente')
+    ? (gameData.player2_id === 'a9f80596-2373-4343-bdfa-8b9c0eee84c4' 
+        ? 'Ordinateur' 
+        : playerEmails[gameData.player2_id || ''] || 'En attente')
     : playerEmails[gameData.player1_id] || 'Inconnu';
+  
   const showJoinButton = gameStatus === 'open' && !gameData.player2_id && userId !== gameData.player1_id;
 
   if (isLoading) {
-    return <div className="text-center text-lg">Chargement...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center text-lg">Chargement de la partie...</div>
+      </div>
+    );
   }
 
   return (
-    <div className="max-w-9xl flex flex-col items-center justify-center p-5">
+    <div className="flex flex-col items-center justify-center p-4">
       <Head>
         <title>Jeu de Dames Professionnel</title>
         <meta name="description" content="Un jeu de dames professionnel construit avec Next.js et Tailwind CSS" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
-      <main className="bg-white w-full max-w-4xl">
+      <main className="bg-white rounded-lg shadow-lg w-full max-w-4xl p-6">
         <GameHeader
           playerRole={playerRole}
           opponentEmail={opponentEmail}
@@ -230,9 +307,10 @@ export default function GamePage({ game }: { game: Game }) {
           player2Id={gameData.player2_id}
           playerEmails={playerEmails}
           isComputerMode={isComputerMode}
+          gameStatus={gameStatus}
         />
 
-        <div className="relative">
+        <div className="relative my-6">
           <CheckerBoard
             board={board}
             selectedPiece={selectedPiece}
@@ -242,12 +320,29 @@ export default function GamePage({ game }: { game: Game }) {
             playerRole={playerRole}
             lastPlayer2Move={lastPlayer2Move}
           />
-          {gameStatus !== 'active' && <GameOverlay gameStatus={gameStatus} />}
+          {gameStatus !== 'active' && (
+            <GameOverlay 
+              gameStatus={gameStatus} 
+              onJoin={showJoinButton ? handleJoinGame : undefined}
+            />
+          )}
         </div>
 
-        <Controls onReset={initializeBoard} onResign={resignGame} disabled={gameStatus !== 'active'} />
+        <Controls 
+          onReset={initializeBoard} 
+          onResign={resignGame} 
+          disabled={gameStatus !== 'active' || !isPlayer1 && !isPlayer2}
+          showResign={gameStatus === 'active' && (isPlayer1 || isPlayer2)}
+        />
+        
         <div className="mb-6" />
-        <GameInfo currentPlayer={currentPlayer} redPieces={redPieces} blackPieces={blackPieces} gameStatus={gameStatus} />
+        
+        <GameInfo 
+          currentPlayer={currentPlayer} 
+          redPieces={redPieces} 
+          blackPieces={blackPieces} 
+          gameStatus={gameStatus} 
+        />
       </main>
     </div>
   );

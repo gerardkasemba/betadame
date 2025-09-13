@@ -226,6 +226,14 @@ export const useCheckersGame = (initialGame?: Game) => {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const computerModeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const computerMoveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef(true);
+
+  // Set isMountedRef to false on cleanup
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Get current user ID with caching
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {
@@ -354,7 +362,7 @@ export const useCheckersGame = (initialGame?: Game) => {
 
   // Activate computer mode
   const activateComputerMode = useCallback(async () => {
-    if (!initialGame || initialGame.player2_id) return;
+    if (!initialGame || initialGame.player2_id || !isMountedRef.current) return;
     
     try {
       // First, deduct stake from computer account
@@ -367,7 +375,7 @@ export const useCheckersGame = (initialGame?: Game) => {
           status: 'active',
           player2_id: COMPUTER_ID,
           closes_at: null,
-          stake: initialGame.stake * 2, // Total stake is now player1 + computer
+          stake: initialGame.stake * 1, // Total stake is now player1 + computer
         })
         .eq('id', initialGame.id);
 
@@ -377,12 +385,17 @@ export const useCheckersGame = (initialGame?: Game) => {
         throw error;
       }
 
-      setIsComputerMode(true);
-      setGameStatus('active');
-      setOpponentActivity('Vous jouez contre l\'ordinateur (mode difficile)');
+      // Only update state if component is still mounted
+      if (isMountedRef.current) {
+        setIsComputerMode(true);
+        setGameStatus('active');
+        setOpponentActivity('Vous jouez contre l\'ordinateur (mode difficile)');
+      }
     } catch (error) {
       console.error('Error activating computer mode:', error);
-      setError('Erreur lors de l\'activation du mode ordinateur');
+      if (isMountedRef.current) {
+        setError('Erreur lors de l\'activation du mode ordinateur');
+      }
       throw error;
     }
   }, [initialGame, supabase, updateUserBalance]);
@@ -537,7 +550,7 @@ export const useCheckersGame = (initialGame?: Game) => {
 
   // Computer move logic
   const makeComputerMove = useCallback(async () => {
-    if (!isComputerMode || !initialGame || currentPlayer !== 'red' || gameStatus !== 'active') return;
+    if (!isComputerMode || !initialGame || currentPlayer !== 'red' || gameStatus !== 'active' || !isMountedRef.current) return;
 
     try {
       const { move } = minimax(board, 4, true, -Infinity, Infinity);
@@ -556,8 +569,10 @@ export const useCheckersGame = (initialGame?: Game) => {
           
         if (error) throw error;
         
-        setGameStatus('finished');
-        setError('Partie terminée ! Vous avez gagné !');
+        if (isMountedRef.current) {
+          setGameStatus('finished');
+          setError('Partie terminée ! Vous avez gagné !');
+        }
         await handleGameCompletion(initialGame.player1_id);
         return;
       }
@@ -570,12 +585,15 @@ export const useCheckersGame = (initialGame?: Game) => {
         move.to.captured
       );
 
-      setBoard(newBoard);
-      setRedPieces(newRedPieces);
-      setBlackPieces(newBlackPieces);
-      setTimeLeft(30);
-      setOpponentActivity(`L'ordinateur a déplacé de (${move.from.row}, ${move.from.col}) à (${move.to.row}, ${move.to.col})`);
-      setLastPlayer2Move({ from: move.from, to: { row: move.to.row, col: move.to.col } });
+      // Update state only if component is still mounted
+      if (isMountedRef.current) {
+        setBoard(newBoard);
+        setRedPieces(newRedPieces);
+        setBlackPieces(newBlackPieces);
+        setTimeLeft(30);
+        setOpponentActivity(`L'ordinateur a déplacé de (${move.from.row}, ${move.from.col}) à (${move.to.row}, ${move.to.col})`);
+        setLastPlayer2Move({ from: move.from, to: { row: move.to.row, col: move.to.col } });
+      }
 
       const winner = checkGameOver(newBoard, 'red');
       const updateData: Partial<Game> = {
@@ -595,7 +613,9 @@ export const useCheckersGame = (initialGame?: Game) => {
         .eq('id', initialGame.id);
 
       if (error) {
-        setError('Erreur lors du mouvement de l\'ordinateur : ' + error.message);
+        if (isMountedRef.current) {
+          setError('Erreur lors du mouvement de l\'ordinateur : ' + error.message);
+        }
         return;
       }
 
@@ -619,15 +639,19 @@ export const useCheckersGame = (initialGame?: Game) => {
         );
       }
 
-      setCurrentPlayer('black');
-      if (winner) {
-        setGameStatus('finished');
-        setTimeLeft(0);
-        await handleGameCompletion(COMPUTER_ID);
+      if (isMountedRef.current) {
+        setCurrentPlayer('black');
+        if (winner) {
+          setGameStatus('finished');
+          setTimeLeft(0);
+          await handleGameCompletion(COMPUTER_ID);
+        }
       }
     } catch (error) {
       console.error('Error in makeComputerMove:', error);
-      setError('Erreur lors du mouvement de l\'ordinateur');
+      if (isMountedRef.current) {
+        setError('Erreur lors du mouvement de l\'ordinateur');
+      }
     }
   }, [isComputerMode, initialGame, currentPlayer, gameStatus, board, supabase, handleGameCompletion, minimax]);
 
@@ -689,7 +713,9 @@ export const useCheckersGame = (initialGame?: Game) => {
             );
           }
           
-          setCurrentPlayer(nextPlayer);
+          if (isMountedRef.current) {
+            setCurrentPlayer(nextPlayer);
+          }
           return 30;
         }
         return prev - 1;
@@ -737,7 +763,7 @@ export const useCheckersGame = (initialGame?: Game) => {
           player2_id: userId,
           status: 'active',
           closes_at: null,
-          stake: initialGame.stake * 2, // Total stake is now player1 + player2
+          stake: initialGame.stake * 1, // Total stake is now player1 + player2
         })
         .eq('id', initialGame.id);
 
@@ -747,7 +773,9 @@ export const useCheckersGame = (initialGame?: Game) => {
         throw gameError;
       }
 
-      setGameStatus('active');
+      if (isMountedRef.current) {
+        setGameStatus('active');
+      }
       
       // Clear computer mode timer if it exists
       if (computerModeTimerRef.current) {
@@ -756,7 +784,9 @@ export const useCheckersGame = (initialGame?: Game) => {
       }
     } catch (error) {
       console.error('Error joining game:', error);
-      setError('Erreur lors de la jointure : ' + (error as Error).message);
+      if (isMountedRef.current) {
+        setError('Erreur lors de la jointure : ' + (error as Error).message);
+      }
       throw error;
     }
   }, [initialGame, supabase, isComputerMode, getCurrentUserId, updateUserBalance]);
@@ -817,13 +847,17 @@ export const useCheckersGame = (initialGame?: Game) => {
         );
       }
 
-      // Update local state
-      setGameStatus('finished');
-      setError('Vous avez abandonné la partie !');
+      // Update local state only if component is still mounted
+      if (isMountedRef.current) {
+        setGameStatus('finished');
+        setError('Vous avez abandonné la partie !');
+      }
       
     } catch (error) {
       console.error('Error resigning game:', error);
-      setError('Erreur lors de l\'abandon : ' + (error as Error).message);
+      if (isMountedRef.current) {
+        setError('Erreur lors de l\'abandon : ' + (error as Error).message);
+      }
     }
   }, [initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode, getCurrentUserId]);
 
@@ -844,44 +878,48 @@ export const useCheckersGame = (initialGame?: Game) => {
         
         if (type === 'move' || type === 'timeout') {
           const newBoard = supabaseToClientBoard(newSupabaseBoard);
-          setBoard(newBoard);
-          setCurrentPlayer(newPlayer === 'white' ? 'red' : 'black');
-          setRedPieces(redPieces);
-          setBlackPieces(blackPieces);
-          setGameStatus(status);
-          setSelectedPiece(null);
-          setValidMoves([]);
+          
+          // Only update state if component is still mounted
+          if (isMountedRef.current) {
+            setBoard(newBoard);
+            setCurrentPlayer(newPlayer === 'white' ? 'red' : 'black');
+            setRedPieces(redPieces);
+            setBlackPieces(blackPieces);
+            setGameStatus(status);
+            setSelectedPiece(null);
+            setValidMoves([]);
 
-          const userId = await getCurrentUserId();
-          if (userId && moveDetails && player_id !== userId && newPlayer === 'black') {
-            const moveText = isComputerMode
-              ? `L'ordinateur a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`
-              : `L'adversaire a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`;
-            setOpponentActivity(moveText);
-            setLastPlayer2Move({ from: moveDetails.from, to: { row: moveDetails.to.row, col: moveDetails.to.col } });
-          } else {
-            setOpponentActivity(null);
-            setLastPlayer2Move(null);
-          }
+            const userId = await getCurrentUserId();
+            if (userId && moveDetails && player_id !== userId && newPlayer === 'black') {
+              const moveText = isComputerMode
+                ? `L'ordinateur a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`
+                : `L'adversaire a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`;
+              setOpponentActivity(moveText);
+              setLastPlayer2Move({ from: moveDetails.from, to: { row: moveDetails.to.row, col: moveDetails.to.col } });
+            } else {
+              setOpponentActivity(null);
+              setLastPlayer2Move(null);
+            }
 
-          if (last_move_at) {
-            const lastMoveTime = new Date(last_move_at).getTime();
-            const now = Date.now();
-            const elapsed = Math.floor((now - lastMoveTime) / 1000);
-            const remaining = Math.max(30 - elapsed, 0);
-            setTimeLeft(remaining);
-          } else {
-            setTimeLeft(30);
-          }
+            if (last_move_at) {
+              const lastMoveTime = new Date(last_move_at).getTime();
+              const now = Date.now();
+              const elapsed = Math.floor((now - lastMoveTime) / 1000);
+              const remaining = Math.max(30 - elapsed, 0);
+              setTimeLeft(remaining);
+            } else {
+              setTimeLeft(30);
+            }
 
-          if (status === 'finished' && winner_id) {
-            setError(`Partie terminée ! Gagnant : ${winner_id}`);
-            setLastPlayer2Move(null);
-            await handleGameCompletion(winner_id);
+            if (status === 'finished' && winner_id) {
+              setError(`Partie terminée ! Gagnant : ${winner_id}`);
+              setLastPlayer2Move(null);
+              await handleGameCompletion(winner_id);
+            }
           }
         } else if (type === 'opponent_active') {
           const userId = await getCurrentUserId();
-          if (userId && player_id !== userId && !isComputerMode) {
+          if (userId && player_id !== userId && !isComputerMode && isMountedRef.current) {
             const isPlayerTurn = await isCurrentPlayer();
             if (!isPlayerTurn) {
               setOpponentActivity('Votre adversaire réfléchit...');
@@ -889,7 +927,7 @@ export const useCheckersGame = (initialGame?: Game) => {
           }
         } else if (type === 'resign') {
           const userId = await getCurrentUserId();
-          if (userId) {
+          if (userId && isMountedRef.current) {
             setGameStatus('finished');
             setError(`Partie terminée ! ${player_id === userId ? 'Vous avez abandonné.' : 'Votre adversaire a abandonné.'}`);
             setTimeLeft(0);
@@ -907,7 +945,9 @@ export const useCheckersGame = (initialGame?: Game) => {
             clearTimeout(computerModeTimerRef.current);
             computerModeTimerRef.current = null;
           }
-          setIsComputerMode(false);
+          if (isMountedRef.current) {
+            setIsComputerMode(false);
+          }
         }
       } catch (error) {
         console.error('Error processing socket message:', error);
@@ -916,12 +956,16 @@ export const useCheckersGame = (initialGame?: Game) => {
 
     socket.onerror = (error) => {
       console.error('Socket error:', error);
-      setError('Connexion au serveur de jeu échouée.');
+      if (isMountedRef.current) {
+        setError('Connexion au serveur de jeu échouée.');
+      }
     };
     
     socket.onclose = () => {
       console.log('Socket closed');
-      setError('Déconnecté du serveur de jeu.');
+      if (isMountedRef.current) {
+        setError('Déconnecté du serveur de jeu.');
+      }
     };
 
     return () => {
@@ -960,12 +1004,14 @@ export const useCheckersGame = (initialGame?: Game) => {
 
             if (jumpMoves.length > 0 && move.isJump) {
               // Continue with jump sequence
-              setBoard(newBoard);
-              setSelectedPiece({ row, col });
-              setValidMoves(jumpMoves);
-              setRedPieces(newRedPieces);
-              setBlackPieces(newBlackPieces);
-              setTimeLeft(30);
+              if (isMountedRef.current) {
+                setBoard(newBoard);
+                setSelectedPiece({ row, col });
+                setValidMoves(jumpMoves);
+                setRedPieces(newRedPieces);
+                setBlackPieces(newBlackPieces);
+                setTimeLeft(30);
+              }
               
               if (socketRef.current) {
                 socketRef.current.send(
@@ -987,20 +1033,22 @@ export const useCheckersGame = (initialGame?: Game) => {
                 );
               }
               
-              if (currentPlayer === 'red') {
+              if (currentPlayer === 'red' && isMountedRef.current) {
                 setLastPlayer2Move({ from: selectedPiece, to: { row, col } });
               }
             } else {
               // Complete the move
-              setBoard(newBoard);
-              setSelectedPiece(null);
-              setValidMoves([]);
-              setRedPieces(newRedPieces);
-              setBlackPieces(newBlackPieces);
-              setTimeLeft(30);
-              
-              if (currentPlayer === 'red') {
-                setLastPlayer2Move({ from: selectedPiece, to: { row, col } });
+              if (isMountedRef.current) {
+                setBoard(newBoard);
+                setSelectedPiece(null);
+                setValidMoves([]);
+                setRedPieces(newRedPieces);
+                setBlackPieces(newBlackPieces);
+                setTimeLeft(30);
+                
+                if (currentPlayer === 'red') {
+                  setLastPlayer2Move({ from: selectedPiece, to: { row, col } });
+                }
               }
 
               const winner = checkGameOver(newBoard, currentPlayer);
@@ -1049,28 +1097,34 @@ export const useCheckersGame = (initialGame?: Game) => {
                 );
               }
 
-              setCurrentPlayer(nextPlayer);
-              if (winner) {
-                setGameStatus('finished');
-                setTimeLeft(0);
-                setLastPlayer2Move(null);
-                await handleGameCompletion(
-                  isComputerMode && winner === 'red'
-                    ? COMPUTER_ID
-                    : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id)
-                );
+              if (isMountedRef.current) {
+                setCurrentPlayer(nextPlayer);
+                if (winner) {
+                  setGameStatus('finished');
+                  setTimeLeft(0);
+                  setLastPlayer2Move(null);
+                  await handleGameCompletion(
+                    isComputerMode && winner === 'red'
+                      ? COMPUTER_ID
+                      : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id)
+                  );
+                }
               }
             }
           } else {
-            setSelectedPiece(null);
-            setValidMoves([]);
+            if (isMountedRef.current) {
+              setSelectedPiece(null);
+              setValidMoves([]);
+            }
           }
         } else {
           const piece = board[row][col];
           if (piece && piece.player === currentPlayer) {
             const moves = getValidMoves(board, { row, col }, currentPlayer);
-            setSelectedPiece({ row, col });
-            setValidMoves(moves);
+            if (isMountedRef.current) {
+              setSelectedPiece({ row, col });
+              setValidMoves(moves);
+            }
             
             if (socketRef.current) {
               socketRef.current.send(
@@ -1084,7 +1138,9 @@ export const useCheckersGame = (initialGame?: Game) => {
         }
       } catch (error) {
         console.error('Error in handleSquareClick:', error);
-        setError('Erreur lors du mouvement : ' + (error as Error).message);
+        if (isMountedRef.current) {
+          setError('Erreur lors du mouvement : ' + (error as Error).message);
+        }
       }
     },
     [board, currentPlayer, selectedPiece, validMoves, initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode, getCurrentUserId, isCurrentPlayer]

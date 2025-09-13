@@ -13,6 +13,7 @@ interface MobileGameFooterProps {
   onJoin: () => void;
   showJoinButton: boolean;
   isComputerMode: boolean; // Added for consistency
+  gameStatus: string;
 }
 
 export default function MobileGameFooter({
@@ -25,6 +26,7 @@ export default function MobileGameFooter({
   onJoin,
   showJoinButton,
   isComputerMode, // Now accepted
+  gameStatus,
 }: MobileGameFooterProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
