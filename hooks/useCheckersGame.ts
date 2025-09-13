@@ -375,7 +375,7 @@ export const useCheckersGame = (initialGame?: Game) => {
           status: 'active',
           player2_id: COMPUTER_ID,
           closes_at: null,
-          stake: initialGame.stake * 1, // Total stake is now player1 + computer
+          stake: initialGame.stake * 2, // Total stake is now player1 + computer
         })
         .eq('id', initialGame.id);
 
@@ -763,7 +763,7 @@ export const useCheckersGame = (initialGame?: Game) => {
           player2_id: userId,
           status: 'active',
           closes_at: null,
-          stake: initialGame.stake * 1, // Total stake is now player1 + player2
+          stake: initialGame.stake * 2, // Total stake is now player1 + player2
         })
         .eq('id', initialGame.id);
 
@@ -947,6 +947,7 @@ export const useCheckersGame = (initialGame?: Game) => {
           }
           if (isMountedRef.current) {
             setIsComputerMode(false);
+            setGameStatus('active');
           }
         }
       } catch (error) {

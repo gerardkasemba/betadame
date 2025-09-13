@@ -11,7 +11,7 @@ interface GameStatsProps {
   gameStatus: string;
 }
 
-export default function GameStats({ player1Id, player2Id, playerEmails, isComputerMode, gameStatus }: GameStatsProps) {
+export default function GameStats({ player1Id, player2Id, playerEmails, isComputerMode }: GameStatsProps) {
   const { supabase } = useSupabase();
   const [wins, setWins] = useState<{ player1: number; player2: number }>({ player1: 0, player2: 0 });
 

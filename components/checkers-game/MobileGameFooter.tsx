@@ -26,7 +26,7 @@ export default function MobileGameFooter({
   onJoin,
   showJoinButton,
   isComputerMode, // Now accepted
-  gameStatus,
+  // gameStatus,
 }: MobileGameFooterProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 

@@ -80,7 +80,7 @@ export default function GamePage({ game }: { game: Game }) {
     };
 
     fetchUserAndEmails();
-  }, [supabase, gameData.player1_id, gameData.player2_id, initializeBoard]);
+  }, [supabase, gameData.status, gameData.player1_id, gameData.player2_id, initializeBoard]);
 
   // Waiting Timer (60s countdown when open and no p2)
   useEffect(() => {
