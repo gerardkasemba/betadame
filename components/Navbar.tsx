@@ -88,7 +88,7 @@ export function Navbar() {
         <div className="container mx-auto max-w-4xl px-0 flex justify-between items-center">
           {/* Logo */}
           <Link href="/" className="text-2xl font-bold text-yellow-500 flex items-center group">
-            <div className="relative flex items-center px-4 py-2">
+            <div className="relative flex items-center px-0 py-0">
               <Image 
                 src="/logo-betadame-yellow.svg"
                 alt="BetaDame"
@@ -190,7 +190,7 @@ export function Navbar() {
       </nav>
 
       {/* Spacer for desktop navbar */}
-      <div className="h-22 md:block hidden"></div>
+      <div className="h-20 md:block hidden"></div>
 
       {/* Mobile Top Navigation */}
       <nav className="md:hidden fixed top-0 left-0 right-0 bg-crystalBlue-800 text-white z-50 shadow-md">
@@ -305,7 +305,7 @@ export function Navbar() {
       </nav>
 
       {/* Spacer for mobile navbar */}
-      <div className="h-22 md:hidden"></div>
+      <div className="h-20 md:hidden"></div>
 
       <style jsx>{`
         .bg-crystalBlue-800 {

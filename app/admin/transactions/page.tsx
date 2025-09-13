@@ -59,7 +59,7 @@ export default function AdminTransactions() {
             reason: trans.reason,
             created_at: trans.created_at,
             processed_at: trans.processed_at,
-            user_email: trans.users[0]?.email ?? "",
+            user_email: trans.users && trans.users.length > 0 ? trans.users[0]?.email ?? "" : "",
           })) || [];
 
           setTransactions(transformedData);

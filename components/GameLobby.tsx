@@ -371,7 +371,7 @@ export function GameLobby({ games: initialGames }: GameLobbyProps) {
   };
 
   return (
-    <div className="space-y-8 p-0 md:p-4 max-w-4xl mx-auto">
+    <div className="space-y-8 p-0 md:py-4 max-w-4xl mx-auto">
       {/* Error Message */}
       {error && (
         <div className="bg-red-600 p-4 rounded-xl text-white flex items-center gap-3 shadow-lg">

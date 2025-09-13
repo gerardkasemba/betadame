@@ -1,3 +1,5 @@
+export type TransactionStatus = "pending" | "completed" | "canceled";
+
 export interface Piece {
   player: 'red' | 'black';
   isKing: boolean;
@@ -37,29 +39,29 @@ export interface ProfileData {
   balance: number;
 }
 
-export interface Transaction {
+export type Transaction = {
   id: number;
   user_id: string;
-  balance_before: number;
-  request_type: 'deposit' | 'withdraw';
+  balance_before: number | null; // Change from number to number | null
+  request_type: string;
   amount: number;
-  status: 'pending' | 'completed' | 'canceled';
+  status: TransactionStatus;
   reason: string | null;
   created_at: string;
   processed_at: string | null;
-}
+};
 
-export interface RawTransaction {
+export type RawTransaction = {
   id: number;
   user_id: string;
-  balance_before: number;
-  request_type: "deposit" | "withdraw";
+  balance_before: number | null;
+  request_type: string;
   amount: number;
-  status: "pending" | "completed" | "canceled";
+  status: TransactionStatus;
   reason: string | null;
   created_at: string;
   processed_at: string | null;
-  users: { email: string }[];  //
-}
+  users: { email: string }[] | null; // Allow null
+};
 
 export type Board = (Piece | null)[][];
