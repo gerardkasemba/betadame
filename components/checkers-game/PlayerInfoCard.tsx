@@ -1,6 +1,7 @@
 "use client";
-import { FaUserAlt, FaUser, FaGamepad, FaClock, FaCoins } from 'react-icons/fa';
+import { FaUserAlt, FaUser, FaGamepad, FaClock, FaCoins, FaShareAlt } from 'react-icons/fa';
 import JoinButton from './JoinButton';
+import ShareDropdown from './ShareDropdown'; // New component for sharing options
 
 interface PlayerInfoCardProps {
   playerRole: 'black' | 'red' | 'spectator';
@@ -8,11 +9,13 @@ interface PlayerInfoCardProps {
   isYourTurn: boolean;
   timeLeft: number;
   stake: number;
-  waitingTime?: number; // Optional: seconds left for player2 to join
+  waitingTime?: number; // Seconds left for player2 to join
   onJoin: () => void;
   showJoinButton: boolean;
-  isComputerMode: boolean;
+  showShareButton: boolean;
+  onShare: (platform: 'facebook' | 'twitter' | 'whatsapp' | 'copy') => void; // Updated to accept platform parameter
   gameStatus: string;
+  gameLink?: string; // Added for sharing functionality
 }
 
 export default function PlayerInfoCard({
@@ -24,9 +27,20 @@ export default function PlayerInfoCard({
   waitingTime,
   onJoin,
   showJoinButton,
-  // isComputerMode,
-  // gameStatus,
+  showShareButton,
+  onShare,
+  gameStatus,
+  gameLink,
 }: PlayerInfoCardProps) {
+  // Format waiting time to display hours, minutes, and seconds
+  const formatWaitingTime = (seconds?: number) => {
+    if (seconds === undefined || seconds <= 0) return 'Expired';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${hours}h ${minutes}m ${remainingSeconds}s`;
+  };
+
   return (
     <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-md p-6 shadow-sm border border-blue-100 mb-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -37,7 +51,11 @@ export default function PlayerInfoCard({
             </div>
             <div>
               <p className="text-sm text-gray-500">Vous êtes</p>
-              <p className={`text-lg font-semibold ${playerRole === 'black' ? 'text-gray-900' : 'text-red-600'}`}>
+              <p
+                className={`text-lg font-semibold ${
+                  playerRole === 'black' ? 'text-gray-900' : playerRole === 'red' ? 'text-red-600' : 'text-gray-600'
+                }`}
+              >
                 {playerRole === 'black' ? 'Noir' : playerRole === 'red' ? 'Rouge' : 'Spectateur'}
               </p>
             </div>
@@ -89,7 +107,7 @@ export default function PlayerInfoCard({
               </div>
               <div>
                 <p className="text-sm text-gray-500">Attente adversaire</p>
-                <p className="text-yellow-600 font-semibold text-lg">{waitingTime}s</p>
+                <p className="text-yellow-600 font-semibold text-lg">{formatWaitingTime(waitingTime)}</p>
               </div>
             </div>
           )}
@@ -106,11 +124,12 @@ export default function PlayerInfoCard({
         </div>
       </div>
 
-      {showJoinButton && (
-        <div className="mt-6 pt-4 border-t border-blue-200 flex justify-center">
-          <JoinButton onClick={onJoin} />
-        </div>
-      )}
+      <div className="mt-6 pt-4 border-t border-blue-200 flex justify-center space-x-4">
+        {showJoinButton && <JoinButton onClick={onJoin} />}
+        {showShareButton && (
+          <ShareDropdown onShare={onShare} gameLink={gameLink} />
+        )}
+      </div>
     </div>
   );
 }

@@ -188,12 +188,8 @@ const checkGameOver = (board: Board, currentPlayer: 'red' | 'black'): 'red' | 'b
 
   return hasMoves ? null : currentPlayer;
 };
-// Computer player constants
-const COMPUTER_ID = 'a9f80596-2373-4343-bdfa-8b9c0eee84c4';
-const COMPUTER_EMAIL = 'gerardkasemba@gmail.com';
-const COMPUTER_MOVE_DELAY = 1000; // 1 second for computer moves
-const COMPUTER_JOIN_DELAY = 60000; // 60 seconds before computer joins
 
+// Remove computer player constants and logic
 export const useCheckersGame = (initialGame?: Game) => {
   const { supabase } = useSupabase();
   const [board, setBoard] = useState<Board>(() => 
@@ -214,18 +210,15 @@ export const useCheckersGame = (initialGame?: Game) => {
   const [gameStatus, setGameStatus] = useState<'open' | 'active' | 'finished' | 'closed'>(
     initialGame?.status || 'open'
   );
-  const [isComputerMode, setIsComputerMode] = useState<boolean>(
-    initialGame ? !!initialGame.player2_id && initialGame.player2_id === COMPUTER_ID : false
-  );
   const [error, setError] = useState<string | null>(null);
   const [opponentActivity, setOpponentActivity] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(30);
   const [lastPlayer2Move, setLastPlayer2Move] = useState<{ from: Position; to: Position } | null>(null);
+  const [gameLink, setGameLink] = useState<string>('');
   
   const socketRef = useRef<PartySocket | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const computerModeTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const computerMoveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const gameExpiryTimerRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef(true);
 
   // Set isMountedRef to false on cleanup
@@ -253,15 +246,11 @@ export const useCheckersGame = (initialGame?: Game) => {
     const userId = await getCurrentUserId();
     if (!userId) return false;
     
-    if (isComputerMode) {
-      return userId === initialGame.player1_id && currentPlayer === 'black';
-    }
-    
     return (
       (userId === initialGame.player1_id && currentPlayer === 'black') ||
       (userId === initialGame.player2_id && currentPlayer === 'red')
     );
-  }, [initialGame, currentPlayer, isComputerMode, getCurrentUserId]);
+  }, [initialGame, currentPlayer, getCurrentUserId]);
 
   // Initialize or reset the game state
   const initializeBoard = useCallback(() => {
@@ -273,12 +262,16 @@ export const useCheckersGame = (initialGame?: Game) => {
     setRedPieces(initialGame.board.filter(p => p === 'wp' || p === 'wk').length);
     setBlackPieces(initialGame.board.filter(p => p === 'bp' || p === 'bk').length);
     setGameStatus(initialGame.status);
-    setIsComputerMode(!!initialGame.player2_id && initialGame.player2_id === COMPUTER_ID);
     setSelectedPiece(null);
     setValidMoves([]);
     setError(null);
     setOpponentActivity(null);
     setLastPlayer2Move(null);
+    
+    // Generate game link for sharing
+    if (typeof window !== 'undefined') {
+      setGameLink(`${window.location.origin}/game/${initialGame.id}`);
+    }
     
     // Calculate time left based on last move
     if (initialGame.status === 'active' && initialGame.last_move_at) {
@@ -295,18 +288,41 @@ export const useCheckersGame = (initialGame?: Game) => {
   // Update user balance with transaction safety
   const updateUserBalance = useCallback(async (userId: string, amount: number): Promise<number> => {
     try {
-      // Use the database function for atomic balance updates
-      const { data, error } = await supabase.rpc('update_user_balance', {
-        user_id: userId,
-        amount
-      });
+      console.log(`Attempting to update balance for user ${userId} by ${amount}`);
+      
+      // First get current balance
+      const { data: userData, error: fetchError } = await supabase
+        .from('users')
+        .select('balance')
+        .eq('id', userId)
+        .maybeSingle();
+      
+      if (fetchError) {
+        console.error('Error fetching user balance:', fetchError);
+        throw new Error(`Failed to fetch user balance: ${fetchError.message}`);
+      }
+      
+      if (!userData) {
+        throw new Error(`User ${userId} not found`);
+      }
+      
+      // Update balance using direct SQL operation
+      const { data: updatedUser, error: updateError } = await supabase
+        .from('users')
+        .update({ 
+          balance: userData.balance + amount,
+        })
+        .eq('id', userId)
+        .select('balance')
+        .single();
 
-      if (error) {
-        console.error('Error updating user balance:', error.message);
-        throw new Error('Failed to update balance');
+      if (updateError) {
+        console.error('Error updating user balance:', updateError);
+        throw new Error(`Failed to update balance: ${updateError.message}`);
       }
 
-      return data;
+      console.log(`Balance updated successfully. New balance: ${updatedUser.balance}`);
+      return updatedUser.balance;
     } catch (error) {
       console.error('Error in updateUserBalance:', error);
       throw error;
@@ -320,37 +336,24 @@ export const useCheckersGame = (initialGame?: Game) => {
     try {
       const stake = initialGame.stake;
 
-      if (isComputerMode) {
-        // Computer mode: handle stake transfer between player and computer
-        if (winnerId === COMPUTER_ID) {
-          // Computer wins: transfer stake from player to computer
-          await updateUserBalance(initialGame.player1_id, -stake);
-          await updateUserBalance(COMPUTER_ID, stake);
-        } else {
-          // Player wins: transfer stake from computer to player
-          await updateUserBalance(COMPUTER_ID, -stake);
-          await updateUserBalance(initialGame.player1_id, stake);
+      // Regular game between two players
+      if (winnerId === initialGame.player1_id) {
+        // Player 1 wins: gets both stakes
+        await updateUserBalance(initialGame.player1_id, stake);
+        if (initialGame.player2_id) {
+          await updateUserBalance(initialGame.player2_id, -stake);
         }
+      } else if (winnerId === initialGame.player2_id) {
+        // Player 2 wins: gets both stakes
+        await updateUserBalance(initialGame.player2_id, stake);
+        await updateUserBalance(initialGame.player1_id, -stake);
       } else {
-        // Regular game between two players
-        if (winnerId === initialGame.player1_id) {
-          // Player 1 wins: gets both stakes
-          await updateUserBalance(initialGame.player1_id, stake);
-          if (initialGame.player2_id) {
-            await updateUserBalance(initialGame.player2_id, -stake);
-          }
-        } else if (winnerId === initialGame.player2_id) {
-          // Player 2 wins: gets both stakes
-          await updateUserBalance(initialGame.player2_id, stake);
-          await updateUserBalance(initialGame.player1_id, -stake);
-        } else {
-          // Draw - return stakes to both players
-          if (initialGame.player1_id) {
-            await updateUserBalance(initialGame.player1_id, 0); // No change
-          }
-          if (initialGame.player2_id) {
-            await updateUserBalance(initialGame.player2_id, 0); // No change
-          }
+        // Draw - return stakes to both players
+        if (initialGame.player1_id) {
+          await updateUserBalance(initialGame.player1_id, 0); // No change
+        }
+        if (initialGame.player2_id) {
+          await updateUserBalance(initialGame.player2_id, 0); // No change
         }
       }
     } catch (error) {
@@ -358,323 +361,105 @@ export const useCheckersGame = (initialGame?: Game) => {
       setError('Erreur lors de la distribution des gains');
       throw error;
     }
-  }, [initialGame, updateUserBalance, isComputerMode]);
+  }, [initialGame, updateUserBalance]);
 
-  // Activate computer mode
-  const activateComputerMode = useCallback(async () => {
-    if (!initialGame || initialGame.player2_id || !isMountedRef.current) return;
-    
-    try {
-      // First, deduct stake from computer account
-      await updateUserBalance(COMPUTER_ID, -initialGame.stake);
-      
-      // Then update the game to include computer as player 2
-      const { error } = await supabase
-        .from('games')
-        .update({
-          status: 'active',
-          player2_id: COMPUTER_ID,
-          closes_at: null,
-          stake: initialGame.stake * 2, // Total stake is now player1 + computer
-        })
-        .eq('id', initialGame.id);
-
-      if (error) {
-        // If game update fails, refund the computer
-        await updateUserBalance(COMPUTER_ID, initialGame.stake);
-        throw error;
-      }
-
-      // Only update state if component is still mounted
-      if (isMountedRef.current) {
-        setIsComputerMode(true);
-        setGameStatus('active');
-        setOpponentActivity('Vous jouez contre l\'ordinateur (mode difficile)');
-      }
-    } catch (error) {
-      console.error('Error activating computer mode:', error);
-      if (isMountedRef.current) {
-        setError('Erreur lors de l\'activation du mode ordinateur');
-      }
-      throw error;
-    }
-  }, [initialGame, supabase, updateUserBalance]);
-
-  // Check for computer mode activation
-  useEffect(() => {
+  // Check for game expiry (24 hours without player2 joining)
+  const checkGameExpiry = useCallback(async () => {
     if (!initialGame || initialGame.status !== 'open' || initialGame.player2_id) return;
 
     const createdAt = new Date(initialGame.created_at).getTime();
     const now = Date.now();
-    const timeSinceCreation = (now - createdAt) / 1000;
+    const hoursSinceCreation = (now - createdAt) / (1000 * 60 * 60);
 
     // Clear any existing timer
-    if (computerModeTimerRef.current) {
-      clearTimeout(computerModeTimerRef.current);
-      computerModeTimerRef.current = null;
+    if (gameExpiryTimerRef.current) {
+      clearTimeout(gameExpiryTimerRef.current);
+      gameExpiryTimerRef.current = null;
     }
 
-    if (timeSinceCreation >= 60) {
-      // If already past the time, activate computer mode immediately
-      activateComputerMode().catch(console.error);
+    if (hoursSinceCreation >= 24) {
+      // If already past 24 hours, close the game and refund immediately
+      await closeExpiredGame();
     } else {
       // Set a timer for the remaining time
-      const remainingTime = 60 - timeSinceCreation;
-      computerModeTimerRef.current = setTimeout(() => {
-        activateComputerMode().catch(console.error);
-      }, remainingTime * 1000);
+      const remainingHours = 24 - hoursSinceCreation;
+      gameExpiryTimerRef.current = setTimeout(() => {
+        closeExpiredGame();
+      }, remainingHours * 60 * 60 * 1000);
     }
+  }, [initialGame]);
 
-    return () => {
-      if (computerModeTimerRef.current) {
-        clearTimeout(computerModeTimerRef.current);
-      }
-    };
-  }, [initialGame, activateComputerMode]);
-
-  // Hard mode AI using minimax with alpha-beta pruning
-  const minimax = useCallback(
-    (board: Board, depth: number, isMaximizing: boolean, alpha: number, beta: number): { score: number; move: { from: Position; to: Move } | null } => {
-      const winner = checkGameOver(board, isMaximizing ? 'red' : 'black');
-      if (winner === 'red') return { score: 1000 - depth, move: null };
-      if (winner === 'black') return { score: -1000 + depth, move: null };
-      if (depth === 0) {
-        return { score: evaluateBoard(board), move: null };
-      }
-
-      let bestMove: { from: Position; to: Move } | null = null;
-      let bestScore = isMaximizing ? -Infinity : Infinity;
-      const allMoves: { from: Position; to: Move }[] = [];
-
-      // Precompute all possible moves
-      for (let row = 0; row < BOARD_SIZE; row++) {
-        for (let col = 0; col < BOARD_SIZE; col++) {
-          const piece = board[row][col];
-          if (piece && piece.player === (isMaximizing ? 'red' : 'black')) {
-            const moves = getValidMoves(board, { row, col }, isMaximizing ? 'red' : 'black');
-            moves.forEach((move) => allMoves.push({ from: { row, col }, to: move }));
-          }
-        }
-      }
-
-      if (allMoves.length === 0) {
-        return { score: isMaximizing ? -1000 + depth : 1000 - depth, move: null };
-      }
-
-      // Sort moves for better alpha-beta pruning efficiency
-      allMoves.sort((a, b) => {
-        const scoreA = evaluateMove(board, a.from, a.to);
-        const scoreB = evaluateMove(board, b.from, b.to);
-        return isMaximizing ? scoreB - scoreA : scoreA - scoreB;
-      });
-
-      for (const { from, to } of allMoves) {
-        const { newBoard } = movePiece(board, from, { row: to.row, col: to.col }, to.isJump, to.captured);
-        const { score } = minimax(newBoard, depth - 1, !isMaximizing, alpha, beta);
-
-        if (isMaximizing) {
-          if (score > bestScore) {
-            bestScore = score;
-            bestMove = { from, to };
-          }
-          alpha = Math.max(alpha, bestScore);
-          if (beta <= alpha) break;
-        } else {
-          if (score < bestScore) {
-            bestScore = score;
-            bestMove = { from, to };
-          }
-          beta = Math.min(beta, bestScore);
-          if (beta <= alpha) break;
-        }
-      }
-
-      return { score: bestScore, move: bestMove };
-    },
-    []
-  );
-
-  // Evaluate a single move for move ordering
-  const evaluateMove = useCallback((board: Board, from: Position, to: Move): number => {
-    let score = 0;
-    
-    // Prioritize captures
-    if (to.isJump && to.captured) {
-      score += 10;
-    }
-    
-    // Prioritize king promotions
-    const piece = board[from.row][from.col];
-    if (piece && !piece.isKing) {
-      if ((piece.player === 'red' && to.row === 0) || (piece.player === 'black' && to.row === BOARD_SIZE - 1)) {
-        score += 5;
-      }
-    }
-    
-    // Center control
-    const centerCol = Math.floor(BOARD_SIZE / 2);
-    score -= Math.abs(to.col - centerCol) * 0.1;
-    
-    return score;
-  }, []);
-
-  // Evaluate board for minimax
-  const evaluateBoard = useCallback((board: Board): number => {
-    let score = 0;
-    for (let row = 0; row < BOARD_SIZE; row++) {
-      for (let col = 0; col < BOARD_SIZE; col++) {
-        const piece = board[row][col];
-        if (!piece) continue;
-        
-        const value = piece.isKing ? 5 : 1;
-        score += piece.player === 'red' ? value : -value;
-        
-        // Positional advantage
-        if (piece.player === 'red') {
-          score += (7 - row) * 0.1;
-          // Back row defense bonus
-          if (row === BOARD_SIZE - 1) score += 0.2;
-        } else {
-          score -= row * 0.1;
-          // Back row defense bonus
-          if (row === 0) score -= 0.2;
-        }
-        
-        // Center control bonus
-        const centerCol = Math.floor(BOARD_SIZE / 2);
-        score += (piece.player === 'red' ? 1 : -1) * (0.1 / (Math.abs(col - centerCol) + 1));
-      }
-    }
-    return score;
-  }, []);
-
-  // Computer move logic
-  const makeComputerMove = useCallback(async () => {
-    if (!isComputerMode || !initialGame || currentPlayer !== 'red' || gameStatus !== 'active' || !isMountedRef.current) return;
+  // Close expired game and refund player
+  const closeExpiredGame = useCallback(async () => {
+    if (!initialGame || initialGame.status !== 'open' || initialGame.player2_id) return;
 
     try {
-      const { move } = minimax(board, 4, true, -Infinity, Infinity);
+      // Refund the stake to player1
+      await updateUserBalance(initialGame.player1_id, initialGame.stake);
 
-      if (!move) {
-        // No valid moves, player wins
-        const updateData: Partial<Game> = {
-          status: 'finished',
-          winner_id: initialGame.player1_id,
-        };
-        
-        const { error } = await supabase
-          .from('games')
-          .update(updateData)
-          .eq('id', initialGame.id);
-          
-        if (error) throw error;
-        
-        if (isMountedRef.current) {
-          setGameStatus('finished');
-          setError('Partie terminée ! Vous avez gagné !');
-        }
-        await handleGameCompletion(initialGame.player1_id);
-        return;
-      }
-
-      const { newBoard, newRedPieces, newBlackPieces } = movePiece(
-        board,
-        move.from,
-        { row: move.to.row, col: move.to.col },
-        move.to.isJump,
-        move.to.captured
-      );
-
-      // Update state only if component is still mounted
-      if (isMountedRef.current) {
-        setBoard(newBoard);
-        setRedPieces(newRedPieces);
-        setBlackPieces(newBlackPieces);
-        setTimeLeft(30);
-        setOpponentActivity(`L'ordinateur a déplacé de (${move.from.row}, ${move.from.col}) à (${move.to.row}, ${move.to.col})`);
-        setLastPlayer2Move({ from: move.from, to: { row: move.to.row, col: move.to.col } });
-      }
-
-      const winner = checkGameOver(newBoard, 'red');
-      const updateData: Partial<Game> = {
-        board: clientToSupabaseBoard(newBoard),
-        current_player: 'black',
-        last_move_at: new Date().toISOString(),
-      };
-
-      if (winner) {
-        updateData.status = 'finished';
-        updateData.winner_id = COMPUTER_ID;
-      }
-
+      // Update the game status to closed
       const { error } = await supabase
         .from('games')
-        .update(updateData)
+        .update({
+          status: 'closed',
+          closes_at: new Date().toISOString(),
+        })
         .eq('id', initialGame.id);
 
       if (error) {
-        if (isMountedRef.current) {
-          setError('Erreur lors du mouvement de l\'ordinateur : ' + error.message);
-        }
-        return;
+        console.error('Error closing expired game:', error);
+        throw error;
       }
 
-      if (socketRef.current) {
-        socketRef.current.send(
-          JSON.stringify({
-            type: 'move',
-            board: clientToSupabaseBoard(newBoard),
-            currentPlayer: 'black',
-            redPieces: newRedPieces,
-            blackPieces: newBlackPieces,
-            status: winner ? 'finished' : 'active',
-            winner_id: winner ? COMPUTER_ID : null,
-            last_move_at: new Date().toISOString(),
-            moveDetails: {
-              from: move.from,
-              to: { row: move.to.row, col: move.to.col },
-              isJump: move.to.isJump,
-            },
-          })
-        );
-      }
-
+      // Update local state
       if (isMountedRef.current) {
-        setCurrentPlayer('black');
-        if (winner) {
-          setGameStatus('finished');
-          setTimeLeft(0);
-          await handleGameCompletion(COMPUTER_ID);
-        }
+        setGameStatus('closed');
+        setError('Partie fermée après 24 heures sans adversaire. Votre mise a été remboursée.');
       }
     } catch (error) {
-      console.error('Error in makeComputerMove:', error);
+      console.error('Error in closeExpiredGame:', error);
       if (isMountedRef.current) {
-        setError('Erreur lors du mouvement de l\'ordinateur');
+        setError('Erreur lors de la fermeture de la partie expirée');
       }
     }
-  }, [isComputerMode, initialGame, currentPlayer, gameStatus, board, supabase, handleGameCompletion, minimax]);
+  }, [initialGame, supabase, updateUserBalance]);
 
-  // Trigger computer move
-  useEffect(() => {
-    if (isComputerMode && currentPlayer === 'red' && gameStatus === 'active') {
-      // Clear any existing timer
-      if (computerMoveTimerRef.current) {
-        clearTimeout(computerMoveTimerRef.current);
-        computerMoveTimerRef.current = null;
-      }
-      
-      computerMoveTimerRef.current = setTimeout(() => {
-        makeComputerMove();
-      }, COMPUTER_MOVE_DELAY);
-      
-      return () => {
-        if (computerMoveTimerRef.current) {
-          clearTimeout(computerMoveTimerRef.current);
-        }
-      };
+  // Share game on social media
+  const shareGame = useCallback((platform: 'facebook' | 'twitter' | 'whatsapp' | 'copy') => {
+    if (!gameLink) return;
+
+    const text = `Rejoins-moi dans une partie de dames! Mise: ${initialGame?.stake || 0} crédits.`;
+    
+    switch (platform) {
+      case 'facebook':
+        window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(gameLink)}&quote=${encodeURIComponent(text)}`, '_blank');
+        break;
+      case 'twitter':
+        window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(gameLink)}`, '_blank');
+        break;
+      case 'whatsapp':
+        window.open(`https://wa.me/?text=${encodeURIComponent(`${text} ${gameLink}`)}`, '_blank');
+        break;
+      case 'copy':
+        navigator.clipboard.writeText(`${text} ${gameLink}`)
+          .then(() => setError('Lien copié dans le presse-papier!'))
+          .catch(() => setError('Échec de la copie du lien'));
+        break;
     }
-  }, [isComputerMode, currentPlayer, gameStatus, makeComputerMove]);
+  }, [gameLink, initialGame?.stake]);
+
+  // Initialize game expiry check on component mount
+  useEffect(() => {
+    if (initialGame && initialGame.status === 'open' && !initialGame.player2_id) {
+      checkGameExpiry();
+    }
+    
+    return () => {
+      if (gameExpiryTimerRef.current) {
+        clearTimeout(gameExpiryTimerRef.current);
+      }
+    };
+  }, [initialGame, checkGameExpiry]);
 
   // Handle timer countdown
   useEffect(() => {
@@ -729,7 +514,7 @@ export const useCheckersGame = (initialGame?: Game) => {
 
   // Handle joining a game
   const joinGame = useCallback(async () => {
-    if (!initialGame || initialGame.status !== 'open' || initialGame.player2_id || isComputerMode) {
+    if (!initialGame || initialGame.status !== 'open' || initialGame.player2_id) {
       setError('Impossible de rejoindre cette partie');
       throw new Error('Impossible de rejoindre cette partie');
     }
@@ -773,14 +558,14 @@ export const useCheckersGame = (initialGame?: Game) => {
         throw gameError;
       }
 
+      // Clear expiry timer
+      if (gameExpiryTimerRef.current) {
+        clearTimeout(gameExpiryTimerRef.current);
+        gameExpiryTimerRef.current = null;
+      }
+
       if (isMountedRef.current) {
         setGameStatus('active');
-      }
-      
-      // Clear computer mode timer if it exists
-      if (computerModeTimerRef.current) {
-        clearTimeout(computerModeTimerRef.current);
-        computerModeTimerRef.current = null;
       }
     } catch (error) {
       console.error('Error joining game:', error);
@@ -789,7 +574,7 @@ export const useCheckersGame = (initialGame?: Game) => {
       }
       throw error;
     }
-  }, [initialGame, supabase, isComputerMode, getCurrentUserId, updateUserBalance]);
+  }, [initialGame, supabase, getCurrentUserId, updateUserBalance]);
 
   // Handle resigning the game
   const resignGame = useCallback(async () => {
@@ -806,15 +591,9 @@ export const useCheckersGame = (initialGame?: Game) => {
       }
 
       // Determine winner based on who is resigning
-      let winnerId: string | null = null;
-      
-      if (isComputerMode) {
-        winnerId = COMPUTER_ID;
-      } else {
-        winnerId = userId === initialGame.player1_id 
-          ? initialGame.player2_id 
-          : initialGame.player1_id;
-      }
+      const winnerId = userId === initialGame.player1_id 
+        ? initialGame.player2_id 
+        : initialGame.player1_id;
 
       // Update the game status
       const updateData: Partial<Game> = {
@@ -859,7 +638,7 @@ export const useCheckersGame = (initialGame?: Game) => {
         setError('Erreur lors de l\'abandon : ' + (error as Error).message);
       }
     }
-  }, [initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode, getCurrentUserId]);
+  }, [initialGame, gameStatus, supabase, handleGameCompletion, getCurrentUserId]);
 
   // Real-time updates with PartyKit
   useEffect(() => {
@@ -891,9 +670,7 @@ export const useCheckersGame = (initialGame?: Game) => {
 
             const userId = await getCurrentUserId();
             if (userId && moveDetails && player_id !== userId && newPlayer === 'black') {
-              const moveText = isComputerMode
-                ? `L'ordinateur a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`
-                : `L'adversaire a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`;
+              const moveText = `L'adversaire a déplacé de (${moveDetails.from.row}, ${moveDetails.from.col}) à (${moveDetails.to.row}, ${moveDetails.to.col})`;
               setOpponentActivity(moveText);
               setLastPlayer2Move({ from: moveDetails.from, to: { row: moveDetails.to.row, col: moveDetails.to.col } });
             } else {
@@ -919,7 +696,7 @@ export const useCheckersGame = (initialGame?: Game) => {
           }
         } else if (type === 'opponent_active') {
           const userId = await getCurrentUserId();
-          if (userId && player_id !== userId && !isComputerMode && isMountedRef.current) {
+          if (userId && player_id !== userId && isMountedRef.current) {
             const isPlayerTurn = await isCurrentPlayer();
             if (!isPlayerTurn) {
               setOpponentActivity('Votre adversaire réfléchit...');
@@ -934,19 +711,13 @@ export const useCheckersGame = (initialGame?: Game) => {
             setLastPlayer2Move(null);
             
             const winnerId = player_id === userId
-              ? (isComputerMode ? COMPUTER_ID : (userId === initialGame.player1_id ? initialGame.player2_id : initialGame.player1_id))
+              ? (userId === initialGame.player1_id ? initialGame.player2_id : initialGame.player1_id)
               : userId;
               
             await handleGameCompletion(winnerId);
           }
         } else if (type === 'player_joined') {
-          // If a real player joins, cancel computer mode
-          if (computerModeTimerRef.current) {
-            clearTimeout(computerModeTimerRef.current);
-            computerModeTimerRef.current = null;
-          }
           if (isMountedRef.current) {
-            setIsComputerMode(false);
             setGameStatus('active');
           }
         }
@@ -973,7 +744,7 @@ export const useCheckersGame = (initialGame?: Game) => {
       socket.close();
       socketRef.current = null;
     };
-  }, [initialGame, supabase, handleGameCompletion, isComputerMode, getCurrentUserId, isCurrentPlayer]);
+  }, [initialGame, supabase, handleGameCompletion, getCurrentUserId, isCurrentPlayer]);
 
   // Handle square click
   const handleSquareClick = useCallback(
@@ -1061,9 +832,7 @@ export const useCheckersGame = (initialGame?: Game) => {
 
               if (winner) {
                 updateData.status = 'finished';
-                updateData.winner_id = isComputerMode && winner === 'red'
-                  ? COMPUTER_ID
-                  : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id);
+                updateData.winner_id = winner === 'black' ? initialGame.player1_id : initialGame.player2_id;
               }
 
               const { error } = await supabase
@@ -1083,9 +852,7 @@ export const useCheckersGame = (initialGame?: Game) => {
                     blackPieces: newBlackPieces,
                     status: winner ? 'finished' : 'active',
                     winner_id: winner
-                      ? (isComputerMode && winner === 'red'
-                          ? COMPUTER_ID
-                          : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id))
+                      ? (winner === 'black' ? initialGame.player1_id : initialGame.player2_id)
                       : null,
                     player_id: userId,
                     last_move_at: new Date().toISOString(),
@@ -1105,9 +872,7 @@ export const useCheckersGame = (initialGame?: Game) => {
                   setTimeLeft(0);
                   setLastPlayer2Move(null);
                   await handleGameCompletion(
-                    isComputerMode && winner === 'red'
-                      ? COMPUTER_ID
-                      : (winner === 'black' ? initialGame.player1_id : initialGame.player2_id)
+                    winner === 'black' ? initialGame.player1_id : initialGame.player2_id
                   );
                 }
               }
@@ -1144,7 +909,7 @@ export const useCheckersGame = (initialGame?: Game) => {
         }
       }
     },
-    [board, currentPlayer, selectedPiece, validMoves, initialGame, gameStatus, supabase, handleGameCompletion, isComputerMode, getCurrentUserId, isCurrentPlayer]
+    [board, currentPlayer, selectedPiece, validMoves, initialGame, gameStatus, supabase, handleGameCompletion, getCurrentUserId, isCurrentPlayer]
   );
 
   // Cleanup on unmount
@@ -1152,8 +917,7 @@ export const useCheckersGame = (initialGame?: Game) => {
     return () => {
       // Clear all timers
       if (timerRef.current) clearInterval(timerRef.current);
-      if (computerModeTimerRef.current) clearTimeout(computerModeTimerRef.current);
-      if (computerMoveTimerRef.current) clearTimeout(computerMoveTimerRef.current);
+      if (gameExpiryTimerRef.current) clearTimeout(gameExpiryTimerRef.current);
       
       // Close socket
       if (socketRef.current) {
@@ -1177,7 +941,8 @@ export const useCheckersGame = (initialGame?: Game) => {
     error,
     opponentActivity,
     timeLeft,
-    isComputerMode,
     lastPlayer2Move,
+    shareGame,
+    gameLink,
   };
 };

@@ -4,7 +4,6 @@ import MobileGameFooter from './MobileGameFooter';
 import GameStats from './GameStats';
 
 interface GameHeaderProps {
-  // Props passed from page
   playerRole: 'black' | 'red' | 'spectator';
   opponentEmail: string;
   isYourTurn: boolean;
@@ -13,15 +12,27 @@ interface GameHeaderProps {
   waitingTime?: number;
   onJoin: () => void;
   showJoinButton: boolean;
+  showShareButton: boolean;
+  onShare: (platform: 'facebook' | 'twitter' | 'whatsapp' | 'copy') => void;
   player1Id: string;
   player2Id: string | null;
   playerEmails: { [key: string]: string };
-  isComputerMode: boolean;
   gameStatus: string;
+  gameLink?: string;
 }
 
 export default function GameHeader(props: GameHeaderProps) {
-  const { player1Id, player2Id, playerEmails, isComputerMode, gameStatus, ...infoProps } = props;
+  const { 
+    player1Id, 
+    player2Id, 
+    playerEmails, 
+    gameStatus, 
+    showShareButton, 
+    onShare, 
+    gameLink,
+    // Don't destructure onJoin so it stays in infoProps
+    ...infoProps 
+  } = props;
 
   return (
     <div>
@@ -30,18 +41,29 @@ export default function GameHeader(props: GameHeaderProps) {
         player1Id={player1Id} 
         player2Id={player2Id} 
         playerEmails={playerEmails} 
-        isComputerMode={isComputerMode} 
         gameStatus={gameStatus}
       />
 
       {/* Desktop */}
       <div className="hidden md:block">
-        <PlayerInfoCard {...infoProps} isComputerMode={isComputerMode} gameStatus={gameStatus} />
+        <PlayerInfoCard 
+          {...infoProps} // onJoin is included here
+          gameStatus={gameStatus} 
+          showShareButton={showShareButton}
+          onShare={onShare}
+          gameLink={gameLink}
+        />
       </div>
 
       {/* Mobile */}
       <div className="md:hidden">
-        <MobileGameFooter {...infoProps} isComputerMode={isComputerMode} gameStatus={gameStatus} />
+        <MobileGameFooter 
+          {...infoProps} // onJoin is included here
+          gameStatus={gameStatus}
+          showShareButton={showShareButton}
+          onShare={onShare}
+          gameLink={gameLink}
+        />
       </div>
     </div>
   );

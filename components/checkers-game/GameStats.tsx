@@ -7,34 +7,35 @@ interface GameStatsProps {
   player1Id: string;
   player2Id: string | null;
   playerEmails: { [key: string]: string };
-  isComputerMode: boolean; // From hook
   gameStatus: string;
 }
 
-export default function GameStats({ player1Id, player2Id, playerEmails, isComputerMode }: GameStatsProps) {
+export default function GameStats({ player1Id, player2Id, playerEmails, gameStatus }: GameStatsProps) {
   const { supabase } = useSupabase();
   const [wins, setWins] = useState<{ player1: number; player2: number }>({ player1: 0, player2: 0 });
 
   useEffect(() => {
     const fetchWins = async () => {
+      // Fetch Player 1 wins
       const { data: p1Wins } = await supabase
         .from('games')
         .select('id', { count: 'exact' })
         .eq('winner_id', player1Id)
         .eq('status', 'finished');
-      setWins(prev => ({ ...prev, player1: p1Wins?.length || 0 }));
+      setWins((prev) => ({ ...prev, player1: p1Wins?.length || 0 }));
 
-      if (player2Id && !isComputerMode) {
+      // Fetch Player 2 wins if player2Id exists
+      if (player2Id) {
         const { data: p2Wins } = await supabase
           .from('games')
           .select('id', { count: 'exact' })
           .eq('winner_id', player2Id)
           .eq('status', 'finished');
-        setWins(prev => ({ ...prev, player2: p2Wins?.length || 0 }));
+        setWins((prev) => ({ ...prev, player2: p2Wins?.length || 0 }));
       }
     };
     fetchWins();
-  }, [supabase, player1Id, player2Id, isComputerMode]);
+  }, [supabase, player1Id, player2Id]);
 
   const renderTrophies = (count: number, color: string) => {
     const shown = Math.min(count, 5);
@@ -49,7 +50,7 @@ export default function GameStats({ player1Id, player2Id, playerEmails, isComput
   };
 
   const player1Name = playerEmails[player1Id] || 'Joueur 1';
-  const player2Name = isComputerMode ? 'Ordinateur' : (playerEmails[player2Id || ''] || 'Joueur 2');
+  const player2Name = player2Id ? playerEmails[player2Id] || 'Joueur 2' : 'En attente';
 
   return (
     <div className="flex justify-between items-center mb-4 p-4 bg-gray-50 rounded-lg">

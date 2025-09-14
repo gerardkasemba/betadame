@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Head from 'next/head';
 import { useCheckersGame } from '@/hooks/useCheckersGame';
 import { useSupabase } from '@/lib/supabase-client';
@@ -25,11 +25,12 @@ export default function GamePage({ game }: { game: Game }) {
     gameStatus,
     joinGame,
     resignGame,
+    shareGame,
     error,
     opponentActivity,
     timeLeft,
-    isComputerMode,
     lastPlayer2Move,
+    gameLink,
   } = useCheckersGame(game);
 
   const [userId, setUserId] = useState<string | null>(null);
@@ -44,34 +45,40 @@ export default function GamePage({ game }: { game: Game }) {
     const fetchUserAndEmails = async () => {
       setIsLoading(true);
 
-      // Get logged in user
+      // Get logged-in user
       const {
         data: { user },
       } = await supabase.auth.getUser();
       setUserId(user?.id || null);
 
-      // Collect both players' ids
-      const playerIds = [gameData.player1_id, gameData.player2_id].filter(Boolean) as string[];
+      // Collect both players' IDs
+      const playerIds = [gameData.player1_id, gameData.player2_id].filter(
+        Boolean
+      ) as string[];
 
       if (playerIds.length > 0) {
-        // Query users table
-        const { data } = await supabase
-          .from("users")
-          .select("id, email")
-          .in("id", playerIds);
+        const { data, error: fetchError } = await supabase
+          .from('users')
+          .select('id, email')
+          .in('id', playerIds);
 
-        if (data) {
+        if (fetchError) {
+          console.error('Error fetching player emails:', fetchError);
+          toast.error('Failed to fetch player information', {
+            toastId: 'fetch-emails-error',
+            autoClose: 4000,
+          });
+        } else if (data) {
           const emails = data.reduce<Record<string, string>>((acc, user) => {
-            acc[user.id] = user.email ?? "";
+            acc[user.id] = user.email ?? '';
             return acc;
           }, {});
-
           setPlayerEmails(emails);
         }
       }
 
       setIsLoading(false);
-      
+
       // Initialize board only if game is active
       if (gameData.status === 'active') {
         initializeBoard();
@@ -82,7 +89,7 @@ export default function GamePage({ game }: { game: Game }) {
     fetchUserAndEmails();
   }, [supabase, gameData.status, gameData.player1_id, gameData.player2_id, initializeBoard]);
 
-  // Waiting Timer (60s countdown when open and no p2)
+  // Waiting Timer (24-hour countdown when open and no Player 2)
   useEffect(() => {
     if (gameStatus !== 'open' || gameData.player2_id) {
       setWaitingTime(undefined);
@@ -93,31 +100,26 @@ export default function GamePage({ game }: { game: Game }) {
     const updateTimer = () => {
       const now = Date.now();
       const elapsed = (now - createdAt) / 1000;
-      const remaining = Math.max(60 - elapsed, 0);
+      const remaining = Math.max((24 * 60 * 60) - elapsed, 0); // 24 hours in seconds
       setWaitingTime(remaining);
 
       if (remaining > 0) {
         setTimeout(updateTimer, 1000);
-      }
-    };
-    updateTimer();
-  }, [gameStatus, gameData.created_at, gameData.player2_id]);
-
-  // Initialize board when game becomes active
-  useEffect(() => {
-    if (gameData.status === 'active' && !hasGameStarted) {
-      initializeBoard();
-      setHasGameStarted(true);
-      
-      // Show game started notification
-      if (userId && (userId === gameData.player1_id || userId === gameData.player2_id)) {
-        toast.info('La partie a commencé !', { 
-          toastId: 'game-started',
-          autoClose: 3000
+      } else {
+        // Game closes after 24 hours (handled by useCheckersGame)
+        toast.info('Game closed: No opponent joined within 24 hours.', {
+          toastId: 'game-closed',
+          autoClose: 4000,
         });
       }
-    }
-  }, [gameData.status, initializeBoard, hasGameStarted, userId, gameData.player1_id, gameData.player2_id]);
+    };
+
+    updateTimer();
+
+    return () => {
+      setWaitingTime(undefined);
+    };
+  }, [gameStatus, gameData.created_at, gameData.player2_id]);
 
   // Real-time subscription for game updates
   useEffect(() => {
@@ -125,83 +127,72 @@ export default function GamePage({ game }: { game: Game }) {
       .channel(`game:${game.id}`)
       .on(
         'postgres_changes',
-        { 
-          event: 'UPDATE', 
-          schema: 'public', 
-          table: 'games', 
-          filter: `id=eq.${game.id}` 
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'games',
+          filter: `id=eq.${game.id}`,
         },
-        (payload) => {
+        async (payload) => {
           const updatedGame = payload.new as Game;
           setGameData(updatedGame);
 
           // Handle player joining
           if (updatedGame.player2_id && updatedGame.player2_id !== gameData.player2_id) {
             // Fetch new player's email
-            supabase
+            const { data, error } = await supabase
               .from('users')
               .select('id, email')
               .eq('id', updatedGame.player2_id)
-              .single()
-              .then(({ data }) => {
-                if (data) {
-                  setPlayerEmails((prev) => ({ ...prev, [data.id]: data.email || '' }));
-                  
-                  // Show appropriate join message
-                  if (updatedGame.player2_id === 'a9f80596-2373-4343-bdfa-8b9c0eee84c4') {
-                    toast.info("Vous jouez contre l'ordinateur !", { 
-                      toastId: 'computer-join',
-                      autoClose: 4000
-                    });
-                  } else {
-                    toast.info('Un adversaire a rejoint la partie !', { 
-                      toastId: 'player-join',
-                      autoClose: 4000
-                    });
-                  }
-                }
-              });
+              .single();
 
-            // If game becomes active after player join
-            if (updatedGame.status === 'active') {
-              toast.info('La partie commence maintenant !', { 
+            if (error) {
+              console.error('Error fetching new player email:', error);
+              toast.error('Failed to fetch opponent information', {
+                toastId: 'fetch-player-email-error',
+                autoClose: 4000,
+              });
+            } else if (data) {
+              setPlayerEmails((prev) => ({ ...prev, [data.id]: data.email || '' }));
+              toast.info('An opponent has joined the game!', {
+                toastId: 'player-join',
+                autoClose: 4000,
+              });
+            }
+
+            // Initialize board for both players when game becomes active
+            if (updatedGame.status === 'active' && !hasGameStarted) {
+              initializeBoard();
+              setHasGameStarted(true);
+              toast.info('The game has started!', {
                 toastId: 'game-active',
-                autoClose: 3000
+                autoClose: 3000,
               });
             }
           }
 
           // Handle game completion
           if (updatedGame.status === 'finished') {
-            let message = 'Partie terminée ! ';
-            
+            let message = 'Game over! ';
             if (!updatedGame.winner_id) {
-              message += 'Match nul !';
+              message += 'It\'s a draw!';
             } else if (updatedGame.winner_id === userId) {
-              message += 'Vous avez gagné !';
+              message += 'You won!';
             } else {
-              message += 'Votre adversaire a gagné !';
+              message += 'Your opponent won!';
             }
-            
-            toast.info(message, { 
+            toast.info(message, {
               toastId: 'game-finished',
-              autoClose: 5000
+              autoClose: 5000,
             });
           }
 
-          // Handle game status changes
-          if (updatedGame.status !== gameData.status) {
-            if (updatedGame.status === 'active') {
-              toast.info('La partie est maintenant active !', { 
-                toastId: 'game-status-active',
-                autoClose: 3000
-              });
-            } else if (updatedGame.status === 'finished') {
-              toast.info('La partie est terminée.', { 
-                toastId: 'game-status-finished',
-                autoClose: 3000
-              });
-            }
+          // Handle game closure (no opponent joined within 24 hours)
+          if (updatedGame.status === 'closed') {
+            toast.info('Game closed: No opponent joined within 24 hours. Stake refunded.', {
+              toastId: 'game-closed',
+              autoClose: 4000,
+            });
           }
         }
       )
@@ -210,14 +201,14 @@ export default function GamePage({ game }: { game: Game }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, game.id, gameData.player2_id, gameData.status, userId]);
+  }, [supabase, game.id, gameData.player2_id, gameData.status, userId, initializeBoard, hasGameStarted]);
 
   // Error notifications
   useEffect(() => {
     if (error) {
-      toast.error(error, { 
+      toast.error(error, {
         toastId: 'error',
-        autoClose: 5000
+        autoClose: 5000,
       });
     }
   }, [error]);
@@ -225,62 +216,102 @@ export default function GamePage({ game }: { game: Game }) {
   // Opponent activity notifications
   useEffect(() => {
     if (opponentActivity) {
-      toast.info(opponentActivity, { 
+      toast.info(opponentActivity, {
         toastId: 'opponent-activity',
-        autoClose: 3000
+        autoClose: 3000,
       });
     }
   }, [opponentActivity]);
 
-  const handleJoinGame = async () => {
+  const handleJoinGame = useCallback(async () => {
     if (!userId || gameData.player1_id === userId || gameData.player2_id) {
-      toast.error('Vous ne pouvez pas rejoindre cette partie.', { 
+      toast.error('You cannot join this game.', {
         toastId: 'join-error',
-        autoClose: 4000
+        autoClose: 4000,
       });
       return;
     }
-    
+
     if (gameStatus !== 'open') {
-      toast.error('Cette partie n\'est pas ouverte.', { 
+      toast.error('This game is not open.', {
         toastId: 'join-error',
-        autoClose: 4000
+        autoClose: 4000,
       });
       return;
     }
 
     try {
       await joinGame();
-      toast.success('Vous avez rejoint la partie !', { 
+      toast.success('You have joined the game!', {
         toastId: 'join-success',
-        autoClose: 3000
+        autoClose: 3000,
+      });
+      // Initialize board immediately after joining
+      initializeBoard();
+      setHasGameStarted(true);
+    } catch (error) {
+      const errorMessage = (error as Error).message;
+      toast.error(`Error joining game: ${errorMessage}`, {
+        toastId: 'join-error',
+        autoClose: 5000,
+      });
+    }
+  }, [userId, gameData.player1_id, gameData.player2_id, gameStatus, joinGame, initializeBoard]);
+
+  const handleResignGame = useCallback(async () => {
+    try {
+      await resignGame();
+      toast.info('You have resigned the game.', {
+        toastId: 'resign-success',
+        autoClose: 3000,
       });
     } catch (error) {
       const errorMessage = (error as Error).message;
-      toast.error(`Erreur lors de la jointure: ${errorMessage}`, { 
-        toastId: 'join-error',
-        autoClose: 5000
+      toast.error(`Error resigning game: ${errorMessage}`, {
+        toastId: 'resign-error',
+        autoClose: 5000,
       });
     }
-  };
+  }, [resignGame]);
+
+  const handleShareGame = useCallback((platform: 'facebook' | 'twitter' | 'whatsapp' | 'copy') => {
+    try {
+      shareGame(platform);
+      if (platform === 'copy') {
+        toast.success('Game link copied to clipboard!', {
+          toastId: 'share-success',
+          autoClose: 3000,
+        });
+      } else {
+        toast.success('Game shared successfully!', {
+          toastId: 'share-success',
+          autoClose: 3000,
+        });
+      }
+    } catch (error) {
+      const errorMessage = (error as Error).message;
+      toast.error(`Error sharing game: ${errorMessage}`, {
+        toastId: 'share-error',
+        autoClose: 5000,
+      });
+    }
+  }, [shareGame]);
 
   const isPlayer1 = userId === gameData.player1_id;
   const isPlayer2 = userId === gameData.player2_id;
   const isYourTurn = (isPlayer1 && currentPlayer === 'black') || (isPlayer2 && currentPlayer === 'red');
   const playerRole = isPlayer1 ? 'black' : isPlayer2 ? 'red' : 'spectator';
-  
   const opponentEmail = isPlayer1
-    ? (gameData.player2_id === 'a9f80596-2373-4343-bdfa-8b9c0eee84c4' 
-        ? 'Ordinateur' 
-        : playerEmails[gameData.player2_id || ''] || 'En attente')
-    : playerEmails[gameData.player1_id] || 'Inconnu';
-  
+    ? playerEmails[gameData.player2_id || ''] || 'Waiting'
+    : playerEmails[gameData.player1_id] || 'Unknown';
   const showJoinButton = gameStatus === 'open' && !gameData.player2_id && userId !== gameData.player1_id;
+  const showResignButton = gameStatus === 'active' && (isPlayer1 || isPlayer2);
+  const showShareButton = gameStatus === 'open' && isPlayer1;
 
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center text-lg">Chargement de la partie...</div>
+        <div className="text-center text-lg">Loading game...</div>
       </div>
     );
   }
@@ -288,8 +319,8 @@ export default function GamePage({ game }: { game: Game }) {
   return (
     <div className="flex flex-col items-center justify-center p-4">
       <Head>
-        <title>Jeu de Dames Professionnel</title>
-        <meta name="description" content="Un jeu de dames professionnel construit avec Next.js et Tailwind CSS" />
+        <title>Professional Checkers Game</title>
+        <meta name="description" content="A professional checkers game built with Next.js and Tailwind CSS" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
@@ -301,13 +332,15 @@ export default function GamePage({ game }: { game: Game }) {
           timeLeft={timeLeft}
           stake={gameData.stake}
           waitingTime={waitingTime}
-          onJoin={handleJoinGame}
+          onJoin={showJoinButton ? handleJoinGame : 'undefined'}
           showJoinButton={showJoinButton}
+          showShareButton={showShareButton}
+          onShare={handleShareGame}
           player1Id={gameData.player1_id}
           player2Id={gameData.player2_id}
           playerEmails={playerEmails}
-          isComputerMode={isComputerMode}
           gameStatus={gameStatus}
+          gameLink={gameLink}
         />
 
         <div className="relative my-6">
@@ -321,27 +354,28 @@ export default function GamePage({ game }: { game: Game }) {
             lastPlayer2Move={lastPlayer2Move}
           />
           {gameStatus !== 'active' && (
-            <GameOverlay 
-              gameStatus={gameStatus} 
+            <GameOverlay
+              gameStatus={gameStatus}
               onJoin={showJoinButton ? handleJoinGame : undefined}
+              waitingTime={waitingTime}
             />
           )}
         </div>
 
-        <Controls 
-          onReset={initializeBoard} 
-          onResign={resignGame} 
-          disabled={gameStatus !== 'active' || !isPlayer1 && !isPlayer2}
-          showResign={gameStatus === 'active' && (isPlayer1 || isPlayer2)}
+        <Controls
+          onReset={initializeBoard}
+          onResign={handleResignGame}
+          disabled={gameStatus !== 'active' || (!isPlayer1 && !isPlayer2)}
+          showResign={showResignButton}
         />
-        
+
         <div className="mb-6" />
-        
-        <GameInfo 
-          currentPlayer={currentPlayer} 
-          redPieces={redPieces} 
-          blackPieces={blackPieces} 
-          gameStatus={gameStatus} 
+
+        <GameInfo
+          currentPlayer={currentPlayer}
+          redPieces={redPieces}
+          blackPieces={blackPieces}
+          gameStatus={gameStatus}
         />
       </main>
     </div>
