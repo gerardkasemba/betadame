@@ -1,0 +1,31 @@
+// lib/auth-config.ts
+export const authConfig = {
+  regions: [
+    'Kinshasa',
+    'Kongo-Central',
+    'Kwango',
+    'Kwilu',
+    'Mai-Ndombe',
+    'Équateur',
+    'Mongala',
+    'Nord-Ubangi',
+    'Sud-Ubangi',
+    'Tshuapa',
+    'Tshopo',
+    'Bas-Uélé',
+    'Haut-Uélé',
+    'Ituri',
+    'Maniema',
+    'Nord-Kivu',
+    'Sud-Kivu',
+    'Haut-Katanga',
+    'Haut-Lomami',
+    'Lualaba',
+    'Tanganyika',
+    'Lomami',
+    'Sankuru',
+    'Kasaï',
+    'Kasaï-Central',
+    'Kasaï-Oriental'
+  ] as const,
+}

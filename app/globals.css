@@ -1,0 +1,44 @@
+@import "tailwindcss";
+/* Define base variables */
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+
+  /* Main brand palette */
+  --color-primary: #194a8d;
+  --color-secondary: #df1c44;
+  --color-accent: #fecf6a;
+
+  /* Fonts */
+  --font-alan-sans: 'Alan Sans', sans-serif;
+  --font-didact: 'Didact Gothic', sans-serif;
+  --font-fredoka: 'Fredoka', sans-serif;
+  --font-open-sans: 'Open Sans', sans-serif;
+  --font-ubuntu: 'Ubuntu', sans-serif;
+}
+
+/* Tailwind inline theme mapping */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-primary: var(--color-primary);
+  --color-secondary: var(--color-secondary);
+  --color-accent: var(--color-accent);
+
+  --font-sans: var(--font-open-sans);
+  --font-heading: var(--font-ubuntu);
+  --font-alt: var(--font-fredoka);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  @apply bg-background text-foreground font-sans;
+}
+
