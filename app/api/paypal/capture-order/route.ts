@@ -1,86 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/client'
 
-export async function POST(request: NextRequest) {
-  const supabase = createClient()
-  
-  try {
-    const { orderId, amount, agentId } = await request.json()
 
-    const accessToken = await getPayPalAccessToken()
-    
-    const response = await fetch(
-      `${process.env.PAYPAL_API_URL}/v2/checkout/orders/${orderId}/capture`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-        },
-      }
-    )
+const PAYPAL_API = process.env.PAYPAL_MODE === 'live' 
+  ? 'https://api-m.paypal.com'
+  : 'https://api-m.sandbox.paypal.com'
 
-    const captureData = await response.json()
-
-    if (!response.ok) {
-      throw new Error(captureData.message || 'Erreur lors de la capture du paiement')
-    }
-
-    // Payment successful - update agent balance
-    if (captureData.status === 'COMPLETED') {
-      const { data: agent, error } = await supabase
-        .from('agents')
-        .select('platform_balance')
-        .eq('id', agentId)
-        .single()
-
-      if (error) throw error
-
-      const { error: updateError } = await supabase
-        .from('agents')
-        .update({ 
-          platform_balance: (agent?.platform_balance || 0) + amount,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', agentId)
-
-      if (updateError) throw updateError
-
-      // Record the transaction
-      const { error: txError } = await supabase
-        .from('transactions')
-        .insert({
-          agent_id: agentId,
-          type: 'deposit',
-          amount: amount,
-          status: 'completed',
-          reference: `BAL-${Date.now()}`,
-          description: `Achat de solde plateforme via PayPal - Order: ${orderId}`
-        })
-
-      if (txError) throw txError
-    }
-
-    return NextResponse.json({ 
-      success: true, 
-      captureData,
-      message: `Solde de ${amount}$ ajouté avec succès` 
-    })
-  } catch (error) {
-    console.error('Error capturing PayPal order:', error)
-    return NextResponse.json(
-      { error: 'Erreur lors du traitement du paiement' },
-      { status: 500 }
-    )
-  }
-}
-
-async function getPayPalAccessToken(): Promise<string> {
+async function getPayPalAccessToken() {
   const auth = Buffer.from(
-    `${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+    `${process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID}:${process.env.PAYPAL_SECRET}`
   ).toString('base64')
 
-  const response = await fetch(`${process.env.PAYPAL_API_URL}/v1/oauth2/token`, {
+  const response = await fetch(`${PAYPAL_API}/v1/oauth2/token`, {
     method: 'POST',
     headers: {
       'Authorization': `Basic ${auth}`,
@@ -91,4 +22,79 @@ async function getPayPalAccessToken(): Promise<string> {
 
   const data = await response.json()
   return data.access_token
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { orderId, amount } = await request.json()
+
+    if (!orderId) {
+      return NextResponse.json(
+        { error: 'Order ID requis' },
+        { status: 400 }
+      )
+    }
+
+    const accessToken = await getPayPalAccessToken()
+
+    // Capture the order
+    const response = await fetch(
+      `${PAYPAL_API}/v2/checkout/orders/${orderId}/capture`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+      }
+    )
+
+    const data = await response.json()
+
+    if (!response.ok || data.status !== 'COMPLETED') {
+      throw new Error(data.message || 'Failed to capture payment')
+    }
+
+    // Update agent balance in database
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      throw new Error('User not authenticated')
+    }
+
+    // Add transaction record
+    await supabase.from('transactions').insert({
+      user_id: user.id,
+      type: 'agent_balance_purchase',
+      amount: amount,
+      status: 'completed',
+      payment_method: 'paypal',
+      reference: orderId,
+      metadata: {
+        paypal_order_id: orderId,
+        capture_id: data.id,
+        payer_email: data.payer?.email_address,
+      }
+    })
+
+    // Update agent profile balance
+    await supabase.rpc('update_agent_balance', {
+      p_agent_id: user.id,
+      p_amount: amount
+    })
+
+    return NextResponse.json({
+      success: true,
+      orderId,
+      captureId: data.id,
+      status: data.status,
+    })
+  } catch (error) {
+    console.error('Capture order error:', error)
+    return NextResponse.json(
+      { error: 'Erreur lors de la capture du paiement' },
+      { status: 500 }
+    )
+  }
 }
