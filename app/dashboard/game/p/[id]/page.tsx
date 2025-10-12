@@ -518,12 +518,13 @@ export default function GamePage() {
         break;
       case 'material':
         title = isWinner ? getTranslation('yourVictory') : getTranslation('yourDefeat');
-        message = getTranslation('victoryByMaterial');
+        message = 'Victoire par avantage positionnel!';
         type = isWinner ? 'win' : 'lose';
         break;
       case 'draw':
+        // This should rarely happen now
         title = getTranslation('draw');
-        message = getTranslation('draw');
+        message = 'Match nul - les mises sont retournées';
         type = 'draw';
         break;
     }
@@ -608,6 +609,17 @@ export default function GamePage() {
     if (!gameRoom || !userProfile) return;
 
     try {
+      // Calculate final game analysis if not already available
+      let finalAnalysis = gameAnalysis;
+      if (!finalAnalysis) {
+        try {
+          finalAnalysis = ProfessionalCheckersGame.analyzeGame(gameState);
+        } catch (err) {
+          console.error('Failed to calculate final game analysis:', err);
+          finalAnalysis = null;
+        }
+      }
+
       const gameResult = {
         game_room_id: gameRoomId,
         winner_id: winnerId,
@@ -616,7 +628,7 @@ export default function GamePage() {
         final_board_state: ProfessionalCheckersGame.serializeGameState(gameState),
         total_turns: gameState.turnNumber,
         total_moves: gameState.moveHistory.length,
-        game_analysis: gameAnalysis,
+        game_analysis: finalAnalysis, // Now always has analysis or null
         bet_amount: gameRoom.bet_amount,
         prize_distributed: totalBetAmount,
         game_duration: Math.floor((Date.now() - new Date(gameRoom.created_at).getTime()) / 1000),
@@ -626,7 +638,8 @@ export default function GamePage() {
       await supabase.from('game_results').insert(gameResult);
       await updatePlayerRatings(winnerId, participants);
     } catch (err) {
-      // Silent fail
+      console.error('Error saving game result:', err);
+      // Silent fail but log the error
     }
   };
 
@@ -1210,6 +1223,7 @@ export default function GamePage() {
         if (finalGameState.winner) {
           await handleGameFinish(finalGameState.winner, gameStateCheck.reason as any);
         } else {
+          // This should not happen anymore since we always determine a winner
           showGameResultMessage('draw');
         }
       }
@@ -1243,6 +1257,7 @@ export default function GamePage() {
   const checkCurrentGameState = (state: ExtendedGameState): { shouldEnd: boolean; winner: number | null; reason: string } => {
     const validMoves = ProfessionalCheckersGame.findAllValidMoves(state);
     
+    // Check if current player has no valid moves - opponent wins
     if (validMoves.length === 0) {
       return {
         shouldEnd: true,
@@ -1251,6 +1266,7 @@ export default function GamePage() {
       };
     }
     
+    // Check for draw conditions (max moves, repetition, etc.)
     const shouldEnd = ProfessionalCheckersGame.checkGameEndConditions(
       state.board,
       state.currentPlayer,
@@ -1260,10 +1276,12 @@ export default function GamePage() {
     );
     
     if (shouldEnd) {
+      // FIXED: No true draws - determine winner by position
+      const winner = ProfessionalCheckersGame.determineWinnerByPosition(state.board);
       return {
         shouldEnd: true,
-        winner: null,
-        reason: 'draw'
+        winner: winner,
+        reason: 'material' // Game reached max moves, winner determined by position
       };
     }
     
@@ -1274,11 +1292,11 @@ export default function GamePage() {
     };
   };
 
-  const handleGameFinish = async (winnerPlayerNumber: number, reason: 'checkmate' | 'resignation' | 'timeout' | 'material' | 'draw') => {
+  const handleGameFinish = async (winnerPlayerNumber: number | null, reason: 'checkmate' | 'resignation' | 'timeout' | 'material' | 'draw') => {
     if (!gameRoom || !userProfile) return;
 
     try {
-      const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
+      const winnerParticipant = winnerPlayerNumber ? participants.find(p => p.player_number === winnerPlayerNumber) : null;
       const winnerId = winnerParticipant?.user_id || null;
 
       await saveGameResult(winnerId);
@@ -1287,7 +1305,7 @@ export default function GamePage() {
         await distributePrizeMoney(winnerPlayerNumber);
       }
 
-      showGameResultMessage(reason, winnerPlayerNumber);
+      showGameResultMessage(reason, winnerPlayerNumber || undefined);
     } catch (err) {
       // Silent fail
     }
@@ -1323,10 +1341,50 @@ export default function GamePage() {
     }
   };
 
-  const distributePrizeMoney = async (winnerPlayerNumber: number) => {
+  const distributePrizeMoney = async (winnerPlayerNumber: number | null) => {
     if (!gameRoom || !userProfile) return;
 
     try {
+      // FIXED: Handle draw case - return money to both players
+      if (winnerPlayerNumber === null) {
+        // Return bet amount to each player
+        const betAmount = gameRoom.bet_amount;
+        
+        for (const participant of participants) {
+          try {
+            await supabase.rpc('update_user_balance', {
+              user_id: participant.user_id,
+              amount: betAmount,
+            });
+          } catch {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('balance')
+              .eq('id', participant.user_id)
+              .single();
+
+            if (profile) {
+              await supabase
+                .from('profiles')
+                .update({ balance: profile.balance + betAmount })
+                .eq('id', participant.user_id);
+            }
+          }
+
+          await supabase
+            .from('transactions')
+            .insert({
+              user_id: participant.user_id,
+              type: 'game_refund',
+              amount: betAmount,
+              status: 'completed',
+              reference: `GAME-DRAW-${gameRoom.id}`
+            });
+        }
+        return;
+      }
+
+      // Normal case: winner takes all
       const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
       if (!winnerParticipant) return;
 
