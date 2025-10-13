@@ -1,9 +1,24 @@
-// app/dashboard/game/components/active-games.tsx - FULLY UPDATED
+// app/dashboard/game/components/active-games.tsx - REDESIGNED
 'use client'
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Play, Users, Clock, Trophy, MapPin, DollarSign, AlertCircle, Info } from 'lucide-react'
+import { 
+  Play, 
+  Users, 
+  Clock, 
+  Trophy, 
+  DollarSign, 
+  AlertCircle, 
+  Crown,  
+  Zap,
+  Search,
+  TrendingUp,
+  Shield,
+  Sparkles
+} from 'lucide-react'
+import { TbPlayCardStar } from "react-icons/tb";
+import { PiCheckerboardFill } from "react-icons/pi";
 
 interface ActiveGame {
   id: string
@@ -28,20 +43,15 @@ interface Toast {
 export default function ActiveGames() {
   const [games, setGames] = useState<ActiveGame[]>([])
   const [filter, setFilter] = useState<'all' | 'waiting' | 'playing'>('all')
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [gameTypeFilter, setGameTypeFilter] = useState<string>('all')
   const [joiningGame, setJoiningGame] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [searchTerm, setSearchTerm] = useState('')
   const supabase = createClient()
 
   const GAMES_PER_PAGE = 9
-  const GAME_CONFIG = {
-    maxPlayers: 2,
-    minBet: 1,
-    maxBet: 100,
-    allowedRegions: ['EUROPE', 'ASIA', 'AMERICA']
-  }
 
   // Toast system
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'error') => {
@@ -55,7 +65,6 @@ export default function ActiveGames() {
   useEffect(() => {
     loadActiveGames()
     
-    // Subscribe to real-time updates
     const subscription = supabase
       .channel('game_rooms')
       .on('postgres_changes', 
@@ -67,7 +76,7 @@ export default function ActiveGames() {
     return () => {
       subscription.unsubscribe()
     }
-  }, [filter, categoryFilter])
+  }, [filter, gameTypeFilter])
 
   const loadActiveGames = async () => {
     setLoading(true)
@@ -82,8 +91,12 @@ export default function ActiveGames() {
         query = query.eq('status', filter)
       }
 
-      if (categoryFilter !== 'all') {
-        query = query.eq('game_type', categoryFilter)
+      if (gameTypeFilter !== 'all') {
+        if (gameTypeFilter === 'checkers') {
+          query = query.in('game_type', ['checkers', 'checkers_ranked'])
+        } else if (gameTypeFilter === 'cards') {
+          query = query.eq('game_type', 'inter_demande')
+        }
       }
 
       const { data, error } = await query
@@ -105,104 +118,70 @@ export default function ActiveGames() {
     }
   }
 
-  // Pre-join validation function
-  const validateJoinGame = async (gameId: string, userId: string) => {
-    try {
-      const [
-        { data: game, error: gameError },
-        { data: profile, error: profileError },
-        { data: existingParticipant, error: participantError }
-      ] = await Promise.all([
-        supabase.from('game_rooms').select('*').eq('id', gameId).single(),
-        supabase.from('profiles').select('balance').eq('id', userId).single(),
-        supabase.from('game_participants')
-          .select('id')
-          .eq('game_room_id', gameId)
-          .eq('user_id', userId)
-          .single()
-      ])
-
-      if (gameError) throw new Error('Game not found')
-      if (profileError) throw new Error('Profile not found')
-
-      return { game, profile, existingParticipant: existingParticipant && !participantError }
-    } catch (error) {
-      console.error('Validation error:', error)
-      throw error
+  const getGameTypeConfig = (gameType?: string) => {
+    switch (gameType) {
+      case 'checkers_ranked':
+        return {
+          color: 'from-blue-500 to-indigo-600',
+          bgColor: 'bg-gradient-to-br from-blue-50 to-indigo-50',
+          borderColor: 'border-gray-200',
+          textColor: 'text-blue-800',
+          icon: <PiCheckerboardFill className="h-5 w-5" />,
+          name: 'Dames Classées',
+          description: 'Partie classée - Affecte votre rang',
+          badge: '🏆 Classé'
+        }
+      case 'checkers':
+        return {
+          color: 'from-blue-500 to-blue-600',
+          bgColor: 'bg-gradient-to-br from-blue-50 to-blue-50',
+          borderColor: 'border-gray-200',
+          textColor: 'text-blue-800',
+          icon: <PiCheckerboardFill className="h-5 w-5" />,
+          name: 'Dames Rapides',
+          description: 'Partie rapide - Jeu classique',
+          badge: '⚡ Rapide'
+        }
+      case 'inter_demande':
+        return {
+          color: 'from-yellow-500 to-yellow-600',
+          bgColor: 'bg-gradient-to-br from-ywllow-50 to-yellow-50',
+          borderColor: 'border-gray-200',
+          textColor: 'text-yellow-800',
+          icon: <TbPlayCardStar className="h-5 w-5" />,
+          name: 'Jeux d\'Inter',
+          description: 'Cartes spéciales - Défis dynamiques',
+          badge:  <TbPlayCardStar className="h-5 w-5" />
+        }
+      default:
+        return {
+          color: 'from-gray-500 to-gray-600',
+          bgColor: 'bg-gradient-to-br from-gray-50 to-gray-100',
+          borderColor: 'border-gray-200',
+          textColor: 'text-gray-800',
+          icon: <PiCheckerboardFill className="h-5 w-5" />,
+          name: 'Dames Rapides',
+          description: 'Partie classique',
+          badge: '🎮 Jeu'
+        }
     }
   }
 
-  const joinGame = async (gameId: string) => {
-    try {
-      setJoiningGame(gameId)
-      
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        showToast('Vous devez être connecté pour rejoindre une partie', 'error')
-        return
-      }
-
-      // Validate game and user
-      const validation = await validateJoinGame(gameId, user.id)
-      if (!validation.game || !validation.profile) {
-        showToast('Partie ou profil non trouvé', 'error')
-        return
-      }
-
-      const { game, profile, existingParticipant } = validation
-
-      if (existingParticipant) {
-        // User is already in the game, redirect to game page
-        window.location.href = `/dashboard/game/p/${gameId}`
-        return
-      }
-
-      // Check bet amount validity
-      if (game.bet_amount < GAME_CONFIG.minBet || game.bet_amount > GAME_CONFIG.maxBet) {
-        showToast(`Mise invalide. Doit être entre ${GAME_CONFIG.minBet}€ et ${GAME_CONFIG.maxBet}€`, 'error')
-        return
-      }
-
-      // Check user balance
-      if (profile.balance < game.bet_amount) {
-        showToast(`Solde insuffisant. Vous avez ${profile.balance}€ mais la mise est de ${game.bet_amount}€. Veuillez recharger votre compte.`, 'error')
-        return
-      }
-
-      // Check if game is still available
-      if (game.status !== 'waiting' || game.current_players >= game.max_players) {
-        showToast('Cette partie n\'est plus disponible pour rejoindre', 'warning')
-        await loadActiveGames()
-        return
-      }
-
-      // Use transaction for atomic operations
-      const { error: joinError } = await supabase.rpc('join_game_transaction', {
-        p_game_id: gameId,
-        p_user_id: user.id,
-        p_bet_amount: game.bet_amount
-      })
-
-      if (joinError) {
-        console.error('Join transaction error:', joinError)
-        throw new Error(joinError.message)
-      }
-
-      // Show success message
-      showToast(`Vous avez rejoint la partie avec une mise de ${game.bet_amount}€. Le gagnant remportera ${getTotalPrize(game)}€!`, 'success')
-      
-      // Redirect after a short delay to show the success message
-      setTimeout(() => {
-        window.location.href = `/dashboard/game/p/${gameId}`
-      }, 1500)
-
-    } catch (error: any) {
-      console.error('Error joining game:', error)
-      showToast(error.message || 'Erreur lors de la connexion à la partie', 'error')
-    } finally {
-      setJoiningGame(null)
+  // Add this missing function
+  const getGameTypeText = (gameType?: string) => {
+    switch (gameType) {
+      case 'checkers_ranked': return 'Dames Classées'
+      case 'checkers': return 'Dames Rapides'
+      case 'inter_demande': return 'Jeux d\'Inter'
+      default: return 'Dames Rapides'
     }
   }
+
+  // Filter games based on search term
+  const filteredGames = games.filter(game => 
+    game.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    getGameTypeText(game.game_type).toLowerCase().includes(searchTerm.toLowerCase())
+  )
 
   // Fallback join function if RPC is not available
   const joinGameFallback = async (gameId: string) => {
@@ -230,7 +209,10 @@ export default function ActiveGames() {
         .single()
 
       if (existingParticipant) {
-        window.location.href = `/dashboard/game/p/${gameId}`
+        const gamePath = game.game_type === 'inter_demande' 
+          ? `/dashboard/game/inter/${gameId}`
+          : `/dashboard/game/p/${gameId}`
+        window.location.href = gamePath
         return
       }
 
@@ -247,7 +229,7 @@ export default function ActiveGames() {
       }
 
       if (profile.balance < game.bet_amount) {
-        showToast(`Solde insuffisant. Vous avez ${profile.balance}€ mais la mise est de ${game.bet_amount}€. Veuillez recharger votre compte.`, 'error')
+        showToast(`Solde insuffisant. Vous avez ${profile.balance}$ mais la mise est de ${game.bet_amount}$. Veuillez recharger votre compte.`, 'error')
         return
       }
 
@@ -351,10 +333,13 @@ export default function ActiveGames() {
         return
       }
 
-      showToast(`Vous avez rejoint la partie en tant que Joueur ${playerNumber} avec une mise de ${game.bet_amount}€. Le gagnant remportera ${getTotalPrize(game)}€!`, 'success')
+      showToast(`Vous avez rejoint la partie en tant que Joueur ${playerNumber} avec une mise de ${game.bet_amount}$. Le gagnant remportera ${getTotalPrize(game)}$!`, 'success')
       
       setTimeout(() => {
-        window.location.href = `/dashboard/game/p/${gameId}`
+        const gamePath = game.game_type === 'inter_demande' 
+          ? `/dashboard/game/inter/${gameId}`
+          : `/dashboard/game/p/${gameId}`
+        window.location.href = gamePath
       }, 1500)
 
     } catch (error) {
@@ -370,32 +355,22 @@ export default function ActiveGames() {
   }
 
   const getStatusColor = (status: string) => {
-    return status === 'playing' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+    return status === 'playing' 
+      ? 'bg-red-100 text-red-800 border-red-200' 
+      : 'bg-amber-100 text-amber-800 border-amber-200'
   }
 
-  const getStatusText = (status: string) => {
-    return status === 'playing' ? 'En cours' : 'En attente'
+  const getStatusIcon = (status: string) => {
+    return status === 'playing' 
+      ? <Zap className="h-3 w-3 mr-1" />
+      : <Clock className="h-3 w-3 mr-1" />
   }
 
-  const getGameTypeColor = (gameType?: string) => {
-    switch (gameType) {
-      case 'ranked': return 'bg-purple-100 text-purple-800'
-      case 'friendly': return 'bg-blue-100 text-blue-800'
-      default: return 'bg-gray-100 text-gray-800'
-    }
-  }
 
-  const getGameTypeText = (gameType?: string) => {
-    switch (gameType) {
-      case 'ranked': return 'Classée'
-      case 'friendly': return 'Amicale'
-      default: return 'Rapide'
-    }
-  }
 
   // Pagination
-  const totalPages = Math.ceil(games.length / GAMES_PER_PAGE)
-  const paginatedGames = games.slice(
+  const totalPages = Math.ceil(filteredGames.length / GAMES_PER_PAGE)
+  const paginatedGames = filteredGames.slice(
     (currentPage - 1) * GAMES_PER_PAGE,
     currentPage * GAMES_PER_PAGE
   )
@@ -407,292 +382,371 @@ export default function ActiveGames() {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`p-4 rounded-lg shadow-lg border-l-4 ${
+            className={`p-4 rounded-xl shadow-lg border-l-4 backdrop-blur-sm ${
               toast.type === 'success' 
-                ? 'bg-green-50 border-green-500 text-green-800'
+                ? 'bg-red-50/95 border-red-500 text-red-800'
                 : toast.type === 'warning'
-                ? 'bg-yellow-50 border-yellow-500 text-yellow-800'
-                : 'bg-red-50 border-red-500 text-red-800'
+                ? 'bg-amber-50/95 border-amber-500 text-amber-800'
+                : 'bg-yellow-50/95 border-yellow-500 text-yellow-800'
             }`}
           >
             <div className="flex items-center">
-              <AlertCircle className="h-4 w-4 mr-2" />
+              <AlertCircle className="h-4 w-4 mr-3 flex-shrink-0" />
               <span className="text-sm font-medium">{toast.message}</span>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="bg-white rounded-2xl shadow-lg p-8">
+      <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl p-6 sm:p-8 border border-gray-100">
         {/* Header */}
         <div className="text-center mb-8">
-          <Trophy className="h-12 w-12 text-primary mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-foreground text-gray-900 font-heading">
-            Parties Disponibles
+          <div className="relative inline-block">
+            <div className="absolute -inset-4 bg-gradient-to-r from-blue-500 to-blue-500 rounded-2xl blur opacity-20"></div>
+            <Trophy className="h-16 w-16 text-blue-600 relative z-10 mx-auto mb-4" />
+          </div>
+          <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-blue-600 bg-clip-text text-transparent font-heading mb-3">
+            Arène de Jeux
           </h2>
-          <p className="text-gray-600 mt-2">
-            Rejoignez une partie et tentez de remporter le jackpot!
+          <p className="text-gray-600 text-lg max-w-2xl mx-auto">
+            Rejoignez des parties passionnantes et competez pour remporter des récompenses exceptionnelles
           </p>
         </div>
 
-        {/* Filter Section */}
-        <div className="flex flex-col sm:flex-row gap-4 mb-6">
-          <div className="flex space-x-4">
-            <button
-              onClick={() => setFilter('all')}
-              className={`px-4 py-2 rounded-lg transition-colors ${
-                filter === 'all' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'
-              }`}
-            >
-              Toutes les parties
-            </button>
-            <button
-              onClick={() => setFilter('waiting')}
-              className={`px-4 py-2 rounded-lg transition-colors ${
-                filter === 'waiting' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'
-              }`}
-            >
-              En attente
-            </button>
-            <button
-              onClick={() => setFilter('playing')}
-              className={`px-4 py-2 rounded-lg transition-colors ${
-                filter === 'playing' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-700'
-              }`}
-            >
-              En cours
-            </button>
+        {/* Stats Bar */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <div className="bg-gradient-to-br from-blue-50 to-blue-50 rounded-2xl p-4 border border-blue-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-blue-600">Total des parties</p>
+                <p className="text-2xl font-bold text-blue-900">{games.length}</p>
+              </div>
+              <TrendingUp className="h-8 w-8 text-blue-500" />
+            </div>
           </div>
+          <div className="bg-gradient-to-br from-yellow-50 to-yellow-50 rounded-2xl p-4 border border-yellow-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-yellow-600">En attente</p>
+                <p className="text-2xl font-bold text-yellow-900">
+                  {games.filter(g => g.status === 'waiting').length}
+                </p>
+              </div>
+              <Clock className="h-8 w-8 text-yellow-500" />
+            </div>
+          </div>
+          <div className="bg-gradient-to-br from-red-50 to-red-50 rounded-2xl p-4 border border-red-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-red-600">En cours</p>
+                <p className="text-2xl font-bold text-red-900">
+                  {games.filter(g => g.status === 'playing').length}
+                </p>
+              </div>
+              <Zap className="h-8 w-8 text-red-500" />
+            </div>
+          </div>
+        </div>
 
-          <select 
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-4 py-2 rounded-lg text-gray-600 border border-gray-300 bg-white"
-          >
-            <option value="all">Tous les types</option>
-            <option value="quick">Parties rapides</option>
-            <option value="ranked">Classées</option>
-            <option value="friendly">Amicales</option>
-          </select>
+        {/* Filter Section */}
+        <div className="bg-gradient-to-r from-gray-50 to-blue-50/30 rounded-2xl p-6 mb-8 border border-gray-200">
+          <div className="flex flex-col lg:flex-row gap-4 items-center justify-between">
+            <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+              {/* Search */}
+              <div className="relative flex-1 sm:flex-none">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Rechercher une partie..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-4 py-3 w-full sm:w-64 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                />
+              </div>
+
+              {/* Status Filter */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setFilter('all')}
+                  className={`px-4 py-3 rounded-xl transition-all font-medium ${
+                    filter === 'all' 
+                      ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/25' 
+                      : 'bg-white text-gray-700 border border-gray-300 hover:border-blue-300'
+                  }`}
+                >
+                  Toutes
+                </button>
+                <button
+                  onClick={() => setFilter('waiting')}
+                  className={`px-4 py-3 rounded-xl transition-all font-medium ${
+                    filter === 'waiting' 
+                      ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25' 
+                      : 'bg-white text-gray-700 border border-gray-300 hover:border-amber-300'
+                  }`}
+                >
+                  En attente
+                </button>
+                <button
+                  onClick={() => setFilter('playing')}
+                  className={`px-4 py-3 rounded-xl transition-all font-medium ${
+                    filter === 'playing' 
+                      ? 'bg-red-500 text-white shadow-lg shadow-red-500/25' 
+                      : 'bg-white text-gray-700 border border-gray-300 hover:border-red-300'
+                  }`}
+                >
+                  En cours
+                </button>
+              </div>
+            </div>
+
+            {/* Game Type Filter */}
+            <select 
+              value={gameTypeFilter}
+              onChange={(e) => setGameTypeFilter(e.target.value)}
+              className="px-4 py-3 rounded-xl border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
+            >
+              <option value="all">🎮 Tous les jeux</option>
+              <option value="checkers">♟️ Jeux de Dames</option>
+              <option value="cards">🎴 Jeux d'Inter</option>
+            </select>
+          </div>
         </div>
 
         {/* Games Grid */}
         {loading ? (
-          <div className="col-span-full text-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-            <p className="text-gray-500 mt-2">Chargement des parties...</p>
+          <div className="text-center py-16">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <p className="text-gray-500 text-lg">Chargement des parties...</p>
           </div>
         ) : paginatedGames.length === 0 ? (
-          <div className="col-span-full text-center py-12">
-            <Trophy className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-            <p className="text-gray-500">Aucune partie active pour le moment</p>
+          <div className="text-center py-16">
+            <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-br from-gray-100 to-gray-200 rounded-2xl flex items-center justify-center">
+              <Trophy className="h-10 w-10 text-gray-400" />
+            </div>
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Aucune partie trouvée</h3>
+            <p className="text-gray-500 mb-6 max-w-md mx-auto">
+              {searchTerm ? 'Aucune partie ne correspond à votre recherche.' : 'Il n\'y a aucune partie active pour le moment.'}
+            </p>
             <button 
               onClick={() => window.location.href = '/dashboard/game'}
-              className="mt-4 px-4 py-2 bg-primary text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-500 text-white rounded-xl hover:from-blue-600 hover:to-blue-600 transition-all shadow-lg shadow-blue-500/25 font-semibold"
             >
-              Créer une partie
+              Créer la première partie
             </button>
           </div>
         ) : (
           <>
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {paginatedGames.map(game => (
-                <div key={game.id} className="border border-gray-300 rounded-lg p-4 hover:shadow-md transition-shadow bg-gradient-to-br from-white to-gray-50">
-                  {/* Game Header */}
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-3">
-                    {/* Game name */}
-                    <h4 className="font-semibold text-base sm:text-lg text-gray-900 truncate">
-                      {game.name}
-                    </h4>
-
-                    {/* Status + Type badges */}
-                    <div className="flex flex-wrap sm:flex-nowrap gap-2">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs sm:text-sm font-medium ${getStatusColor(
-                          game.status
-                        )}`}
-                      >
-                        {getStatusText(game.status)}
-                      </span>
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs sm:text-sm font-medium ${getGameTypeColor(
-                          game.game_type
-                        )}`}
-                      >
-                        {getGameTypeText(game.game_type)}
-                      </span>
-                    </div>
-                  </div>
-
-
-                  {/* Prize Pool */}
-                  <div className="mb-3 p-3 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-lg border border-yellow-200">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-yellow-800">Jackpot:</span>
-                      <span className="flex items-center font-bold text-yellow-900">
-                        <DollarSign className="h-4 w-4 mr-1" />
-                        {getTotalPrize(game)}€
-                      </span>
-                    </div>
-                    <div className="text-xs text-yellow-700 mt-1">
-                      {game.max_players} joueurs × {game.bet_amount}€ chacun
-                    </div>
-                  </div>
-
-                  {/* Game Details */}
-                  <div className="space-y-2 text-sm text-gray-600 mb-4">
-                    <div className="flex items-center justify-between">
-                      <span>Mise par joueur:</span>
-                      <span className="font-semibold flex items-center">
-                        <DollarSign className="h-3 w-3 mr-1" />
-                        {game.bet_amount}€
-                      </span>
-                    </div>
-                    
-                    <div className="flex items-center justify-between">
-                      <span>Joueurs:</span>
-                      <span className="flex items-center">
-                        <Users className="h-3 w-3 mr-1" />
-                        {game.current_players}/{game.max_players}
-                      </span>
+            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
+              {paginatedGames.map(game => {
+                const config = getGameTypeConfig(game.game_type)
+                
+                return (
+                  <div 
+                    key={game.id} 
+                    className={`rounded-2xl border-2 ${config.borderColor} bg-white p-5 hover:shadow-lg transition-all duration-300 hover:scale-[1.02] group`}
+                  >
+                    {/* Game Header */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center space-x-3">
+                        <div className={`p-2 rounded-xl bg-gradient-to-r ${config.color} text-white shadow-lg`}>
+                          {config.icon}
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-gray-900 text-lg group-hover:text-gray-800">
+                            {game.name}
+                          </h3>
+                          <div className="flex items-center space-x-2 mt-1">
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(game.status)} border`}>
+                              <span className="flex items-center">
+                                {getStatusIcon(game.status)}
+                                {game.status === 'playing' ? 'En cours' : 'En attente'}
+                              </span>
+                            </span>
+                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${config.textColor} bg-white/80 border ${config.borderColor}`}>
+                              {config.badge}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    {game.region && (
+                    {/* Prize Pool - Highlighted */}
+                    <div className="mb-4 p-4 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-200">
                       <div className="flex items-center justify-between">
-                        <span>Région:</span>
-                        <span className="flex items-center">
-                          <MapPin className="h-3 w-3 mr-1" />
-                          {game.region}
+                        <div>
+                          <p className="text-sm font-semibold text-amber-900">💰 Jackpot</p>
+                          <p className="text-xs text-amber-700">Total à gagner</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-amber-900 flex items-center">
+                            <DollarSign className="h-5 w-5 mr-1" />
+                            {getTotalPrize(game)}
+                          </p>
+                          <p className="text-xs text-amber-700">
+                            {game.max_players} × {game.bet_amount}$
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Game Details */}
+                    <div className="space-y-3 mb-4">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Mise par joueur:</span>
+                        <span className="font-semibold text-gray-900 flex items-center">
+                          <DollarSign className="h-3 w-3 mr-1" />
+                          {game.bet_amount}$
                         </span>
                       </div>
-                    )}
-
-                    {game.estimated_duration && (
-                      <div className="flex items-center justify-between">
-                        <span>Durée estimée:</span>
-                        <span className="flex items-center">
-                          <Clock className="h-3 w-3 mr-1" />
-                          {game.estimated_duration}min
+                      
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Joueurs:</span>
+                        <span className="font-semibold text-gray-900 flex items-center">
+                          <Users className="h-3 w-3 mr-1" />
+                          {game.current_players}/{game.max_players}
                         </span>
                       </div>
-                    )}
 
-                    <div className="flex items-center justify-between">
-                      <span>Créée:</span>
-                      <span className="flex items-center">
-                        <Clock className="h-3 w-3 mr-1" />
-                        {new Date(game.created_at).toLocaleDateString('fr-FR')}
-                      </span>
+                      {/* Progress Bar */}
+                      <div className="pt-2">
+                        <div className="flex justify-between text-xs text-gray-500 mb-2">
+                          <span>Progression du recrutement</span>
+                          <span>{Math.round((game.current_players / game.max_players) * 100)}%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div 
+                            className={`h-2 rounded-full transition-all duration-500 ${
+                              game.current_players === game.max_players 
+                                ? 'bg-red-500' 
+                                : 'bg-gradient-to-r from-blue-500 to-blue-500'
+                            }`}
+                            style={{ width: `${(game.current_players / game.max_players) * 100}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Button */}
+                    <div className="mt-4">
+                      {game.status === 'waiting' && game.current_players < game.max_players ? (
+                        <button
+                          onClick={() => joinGameFallback(game.id)}
+                          disabled={joiningGame === game.id}
+                          className={`w-full bg-gradient-to-r ${config.color} text-white py-3 px-4 rounded-xl hover:shadow-lg transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center group`}
+                        >
+                          {joiningGame === game.id ? (
+                            <>
+                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                              Connexion...
+                            </>
+                          ) : (
+                            <>
+                              <Play className="h-4 w-4 mr-2" />
+                              Rejoindre - {game.bet_amount}$
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            const gamePath = game.game_type === 'inter_demande' 
+                              ? `/dashboard/game/inter/${game.id}`
+                              : `/dashboard/game/p/${game.id}`
+                            window.location.href = gamePath
+                          }}
+                          className="w-full bg-gradient-to-r from-gray-600 to-gray-700 text-white py-3 px-4 rounded-xl hover:from-gray-700 hover:to-gray-800 transition-all font-semibold"
+                        >
+                          {game.status === 'playing' ? 'Spectateur' : 'Complet'}
+                        </button>
+                      )}
                     </div>
                   </div>
-
-                  {/* Action Button */}
-                  <div className="mt-4">
-                    {game.status === 'waiting' && game.current_players < game.max_players ? (
-                      <button
-                        onClick={() => joinGameFallback(game.id)}
-                        disabled={joiningGame === game.id}
-                        className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white py-3 px-4 rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-                      >
-                        {joiningGame === game.id ? (
-                          <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                            Traitement...
-                          </>
-                        ) : (
-                          <>
-                            <Play className="h-4 w-4 mr-2" />
-                            Joindre ({game.bet_amount}€)
-                          </>
-                        )}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => window.location.href = `/dashboard/game/p/${game.id}`}
-                        className="w-full bg-gradient-to-r from-primary to-blue-600 text-white py-3 px-4 rounded-lg hover:from-blue-600 hover:to-blue-700 transition-all font-semibold"
-                      >
-                        {game.status === 'playing' ? 'Rejoindre' : 'Complet'}
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div className="mt-3">
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
-                      <span>Progression:</span>
-                      <span>{game.current_players}/{game.max_players}</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-green-500 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${(game.current_players / game.max_players) * 100}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex justify-center mt-8 space-x-2">
+              <div className="flex justify-center items-center space-x-4">
                 <button
                   onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                   disabled={currentPage === 1}
-                  className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 disabled:opacity-50"
+                  className="px-6 py-3 rounded-xl bg-white border border-gray-300 text-gray-700 hover:border-blue-300 disabled:opacity-50 transition-all font-medium"
                 >
-                  Précédent
+                  ← Précédent
                 </button>
-                <span className="px-4 py-2 text-gray-700">
+                <span className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg font-semibold">
                   Page {currentPage} sur {totalPages}
                 </span>
                 <button
                   onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                   disabled={currentPage === totalPages}
-                  className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 disabled:opacity-50"
+                  className="px-6 py-3 rounded-xl bg-white border border-gray-300 text-gray-700 hover:border-blue-300 disabled:opacity-50 transition-all font-medium"
                 >
-                  Suivant
+                  Suivant →
                 </button>
               </div>
             )}
           </>
         )}
 
-        {/* Game Instructions */}
-        <GameInstructions />
+        {/* Info Sections */}
+        <div className="grid md:grid-cols-2 gap-6 mt-12">
+          {/* Game Types Info */}
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-6 border border-blue-200">
+            <h3 className="font-bold text-blue-900 mb-4 flex items-center text-lg">
+              <Sparkles className="h-5 w-5 mr-2" />
+              Types de Jeux Disponibles
+            </h3>
+            <div className="space-y-4">
+              <div className="flex items-center space-x-3 p-3 bg-white/50 rounded-xl">
+                <div className="p-2 bg-gradient-to-r from-blue-500 to-blue-500 rounded-lg text-white">
+                  <PiCheckerboardFill className="h-4 w-4" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-blue-900">Jeux de Dames</h4>
+                  <p className="text-sm text-blue-700">Stratégie classique sur plateau - Déplacez vos pièces avec intelligence</p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-3 p-3 bg-white/50 rounded-xl">
+                <div className="p-2 bg-gradient-to-r from-yellow-500 to-yellow-500 rounded-lg text-white">
+                  <TbPlayCardStar className="h-4 w-4" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-yellow-900">Jeux d'Inter</h4>
+                  <p className="text-sm text-yellow-700">Cartes spéciales et défis dynamiques - Effets uniques et stratégie</p>
+                </div>
+              </div>
+            </div>
+          </div>
 
-        {/* Info Box */}
-        <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-          <h3 className="font-semibold text-blue-900 mb-2 flex items-center">
-            <Info className="h-4 w-4 mr-2" />
-            Comment ça marche ?
-          </h3>
-          <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-            <li>Chaque joueur mise le même montant (ex: 5€)</li>
-            <li>Le jackpot total = mise × nombre de joueurs (ex: 5€ × 2 = 10€)</li>
-            <li>Le gagnant remporte la totalité du jackpot</li>
-            <li>Votre mise est déduite de votre solde lorsque vous rejoignez</li>
-            <li>En cas d'abandon, votre mise reste dans le jackpot</li>
-          </ul>
+          {/* Quick Rules */}
+          <div className="bg-gradient-to-br from-red-50 to-red-50 rounded-2xl p-6 border border-red-200">
+            <h3 className="font-bold text-red-900 mb-4 flex items-center text-lg">
+              <Shield className="h-5 w-5 mr-2" />
+              Règles du Jeu
+            </h3>
+            <ul className="space-y-3 text-sm text-red-800">
+              <li className="flex items-start space-x-2">
+                <div className="w-2 h-2 bg-red-500 rounded-full mt-1.5 flex-shrink-0"></div>
+                <span>Votre mise est déduite immédiatement en rejoignant</span>
+              </li>
+              <li className="flex items-start space-x-2">
+                <div className="w-2 h-2 bg-red-500 rounded-full mt-1.5 flex-shrink-0"></div>
+                <span>Le jackpot total est remporté par le vainqueur</span>
+              </li>
+              <li className="flex items-start space-x-2">
+                <div className="w-2 h-2 bg-red-500 rounded-full mt-1.5 flex-shrink-0"></div>
+                <span>Respectez les autres joueurs et les règles</span>
+              </li>
+              <li className="flex items-start space-x-2">
+                <div className="w-2 h-2 bg-red-500 rounded-full mt-1.5 flex-shrink-0"></div>
+                <span>Les parties commencent automatiquement quand pleines</span>
+              </li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>
   )
 }
-
-// Game Instructions Component
-const GameInstructions = () => (
-  <div className="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-    <h3 className="font-semibold text-gray-900 mb-2 flex items-center">
-      <Info className="h-4 w-4 mr-2" />
-      📋 Règles du jeu
-    </h3>
-    <ul className="text-sm text-gray-700 space-y-1 list-disc list-inside">
-      <li>Votre mise est déduite immédiatement lorsque vous rejoignez</li>
-      <li>Le jackpot est remporté par le vainqueur de la partie</li>
-      <li>En cas d'abandon, votre mise n'est pas remboursée</li>
-      <li>Les parties commencent automatiquement quand tous les joueurs sont prêts</li>
-      <li>Respectez les autres joueurs et les règles du jeu</li>
-    </ul>
-  </div>
-)

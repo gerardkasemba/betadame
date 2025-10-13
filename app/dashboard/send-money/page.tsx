@@ -1,4 +1,4 @@
-// app/dashboard/digital-wallet/page.tsx (simplified)
+// app/dashboard/digital-wallet/page.tsx (fixed)
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -21,6 +21,7 @@ export default function DigitalWalletPage() {
   const [sendAmount, setSendAmount] = useState(0)
   const [isRequestsPanelOpen, setIsRequestsPanelOpen] = useState(false)
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0)
+  const [hasNewRequest, setHasNewRequest] = useState(false)
 
   const supabase = createClient()
   const router = useRouter()
@@ -28,6 +29,7 @@ export default function DigitalWalletPage() {
   useEffect(() => {
     fetchCurrentUser()
     fetchPendingRequestsCount()
+    checkForNewRequests()
   }, [])
 
   const fetchCurrentUser = async () => {
@@ -68,11 +70,43 @@ export default function DigitalWalletPage() {
     }
   }
 
+  const checkForNewRequests = async () => {
+    if (!currentUser) return
+
+    try {
+      // Check for requests created in the last 24 hours
+      const twentyFourHoursAgo = new Date()
+      twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24)
+
+      const { data, error } = await supabase
+        .from('funds_requests')
+        .select('id, created_at')
+        .eq('recipient_id', currentUser.id)
+        .eq('status', 'pending')
+        .gte('created_at', twentyFourHoursAgo.toISOString())
+
+      if (error) throw error
+      
+      // If there are any pending requests from the last 24 hours, show as "new"
+      setHasNewRequest((data?.length || 0) > 0)
+    } catch (error) {
+      console.error('Error checking for new requests:', error)
+    }
+  }
+
   const handleBalanceUpdate = () => {
     fetchCurrentUser()
   }
 
   const handleRequestCreated = () => {
+    fetchPendingRequestsCount()
+    checkForNewRequests()
+  }
+
+  const handleRequestPanelClose = () => {
+    setIsRequestsPanelOpen(false)
+    // Reset new request flag when user views the requests
+    setHasNewRequest(false)
     fetchPendingRequestsCount()
   }
 
@@ -82,10 +116,11 @@ export default function DigitalWalletPage() {
         {/* Balance Card */}
         <BalanceCard currentUser={currentUser} sendAmount={sendAmount} />
 
-        {/* Action Buttons */}
+        {/* Action Buttons - Fixed with hasNewRequest prop */}
         <ActionButtons 
           onRequestFundsClick={() => setIsRequestsPanelOpen(true)}
           pendingRequestsCount={pendingRequestsCount}
+          hasNewRequest={hasNewRequest}
         />
 
         {/* Combined Transfer Form */}
@@ -112,7 +147,7 @@ export default function DigitalWalletPage() {
       <FundsRequestsPanel
         currentUser={currentUser}
         isOpen={isRequestsPanelOpen}
-        onClose={() => setIsRequestsPanelOpen(false)}
+        onClose={handleRequestPanelClose}
         onBalanceUpdate={handleBalanceUpdate}
       />
     </div>
