@@ -1,4 +1,4 @@
-// app/dashboard/digital-wallet/page.tsx (simplified)
+// app/dashboard/digital-wallet/page.tsx
 'use client'
 
 import { useState, useEffect } from 'react'
@@ -21,6 +21,7 @@ export default function DigitalWalletPage() {
   const [sendAmount, setSendAmount] = useState(0)
   const [isRequestsPanelOpen, setIsRequestsPanelOpen] = useState(false)
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0)
+  const [hasNewRequest, setHasNewRequest] = useState(false)
 
   const supabase = createClient()
   const router = useRouter()
@@ -28,7 +29,144 @@ export default function DigitalWalletPage() {
   useEffect(() => {
     fetchCurrentUser()
     fetchPendingRequestsCount()
+    
+    // Set up real-time subscriptions
+    const setupSubscriptions = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      // Subscribe to profile changes (balance updates)
+      const profileSubscription = supabase
+        .channel('profile-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'profiles',
+            filter: `id=eq.${user.id}`
+          },
+          (payload) => {
+            console.log('Profile updated:', payload.new)
+            setCurrentUser(payload.new as UserProfile)
+          }
+        )
+        .subscribe()
+
+      // Subscribe to funds requests (new requests and status changes)
+      const fundsRequestsSubscription = supabase
+        .channel('funds-requests')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'funds_requests',
+            filter: `recipient_id=eq.${user.id}`
+          },
+          (payload) => {
+            console.log('New funds request received:', payload)
+            // Show new request notification
+            setHasNewRequest(true)
+            fetchPendingRequestsCount()
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'funds_requests',
+            filter: `recipient_id=eq.${user.id}`
+          },
+          (payload) => {
+            console.log('Funds request updated:', payload)
+            fetchPendingRequestsCount()
+            
+            // If a request was updated and current user is the sender, refresh balance
+            if (payload.old.sender_id === user.id && payload.new.status === 'accepted') {
+              fetchCurrentUser()
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'funds_requests',
+            filter: `recipient_id=eq.${user.id}`
+          },
+          () => {
+            fetchPendingRequestsCount()
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'funds_requests',
+            filter: `sender_id=eq.${user.id}`
+          },
+          () => {
+            // Refresh balance when user sends a new request
+            fetchCurrentUser()
+          }
+        )
+        .subscribe()
+
+      // Subscribe to transfers (both sent and received)
+      const transfersSubscription = supabase
+        .channel('transfers')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'transfers',
+            filter: `from_id=eq.${user.id}`
+          },
+          () => {
+            console.log('Transfer sent - refreshing balance')
+            fetchCurrentUser()
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'transfers',
+            filter: `to_id=eq.${user.id}`
+          },
+          () => {
+            console.log('Transfer received - refreshing balance')
+            fetchCurrentUser()
+          }
+        )
+        .subscribe()
+
+      return () => {
+        profileSubscription.unsubscribe()
+        fundsRequestsSubscription.unsubscribe()
+        transfersSubscription.unsubscribe()
+      }
+    }
+
+    const cleanup = setupSubscriptions()
+
+    return () => {
+      cleanup.then((unsubscribe) => unsubscribe?.())
+    }
   }, [])
+
+  // Reset new request notification when panel opens
+  useEffect(() => {
+    if (isRequestsPanelOpen && hasNewRequest) {
+      setHasNewRequest(false)
+    }
+  }, [isRequestsPanelOpen, hasNewRequest])
 
   const fetchCurrentUser = async () => {
     try {
@@ -76,6 +214,12 @@ export default function DigitalWalletPage() {
     fetchPendingRequestsCount()
   }
 
+  const handleOpenRequestsPanel = () => {
+    // Reset new request notification when opening the panel
+    setHasNewRequest(false)
+    setIsRequestsPanelOpen(true)
+  }
+
   return (
     <div className="bg-gray-50 py-0">
       <div className="max-w-7xl mx-auto px-4 md:px-0">
@@ -84,8 +228,9 @@ export default function DigitalWalletPage() {
 
         {/* Action Buttons */}
         <ActionButtons 
-          onRequestFundsClick={() => setIsRequestsPanelOpen(true)}
+          onRequestFundsClick={handleOpenRequestsPanel}
           pendingRequestsCount={pendingRequestsCount}
+          hasNewRequest={hasNewRequest}
         />
 
         {/* Combined Transfer Form */}
@@ -94,6 +239,14 @@ export default function DigitalWalletPage() {
           onBalanceUpdate={handleBalanceUpdate}
           onRequestCreated={handleRequestCreated}
         />
+
+        {/* Real-time Status Indicator */}
+        <div className="mt-4 flex items-center justify-center">
+          <div className="flex items-center space-x-2 text-xs text-green-600">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span>Mises à jour en temps réel activées</span>
+          </div>
+        </div>
 
         {/* Security Notice */}
         <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4">

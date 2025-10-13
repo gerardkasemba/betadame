@@ -48,15 +48,23 @@ export default function FundsRequestsPanel({
   const [isLoading, setIsLoading] = useState(true)
   const [processingRequest, setProcessingRequest] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<RequestTab>('incoming')
+  const [isAnimating, setIsAnimating] = useState(false)
 
   const supabase = createClient()
   const { addToast } = useToast()
 
   useEffect(() => {
-    if (isOpen && currentUser) {
-      fetchAllRequests()
-      const unsubscribe = setupRealtimeSubscription()
-      return unsubscribe
+    if (isOpen) {
+      setIsAnimating(true)
+      if (currentUser) {
+        fetchAllRequests()
+        const unsubscribe = setupRealtimeSubscription()
+        return unsubscribe
+      }
+    } else {
+      // Delay unmounting to allow exit animation
+      const timer = setTimeout(() => setIsAnimating(false), 300)
+      return () => clearTimeout(timer)
     }
   }, [isOpen, currentUser])
 
@@ -142,6 +150,7 @@ export default function FundsRequestsPanel({
     setProcessingRequest(request.id)
 
     try {
+      // First, check if user has sufficient balance
       if ((currentUser.balance || 0) < request.amount) {
         addToast({
           type: 'error',
@@ -149,66 +158,128 @@ export default function FundsRequestsPanel({
           message: `Vous n'avez pas assez de fonds pour accepter cette demande`,
           duration: 5000,
         })
+        setProcessingRequest(null)
         return
       }
 
+      // Step 1: Get current balances to ensure we have latest data
+      const { data: senderData, error: senderFetchError } = await supabase
+        .from('profiles')
+        .select('balance')
+        .eq('id', currentUser.id)
+        .single()
+
+      if (senderFetchError) throw new Error('Failed to fetch your current balance')
+
+      const { data: requesterData, error: requesterFetchError } = await supabase
+        .from('profiles')
+        .select('balance')
+        .eq('id', request.requester_id)
+        .single()
+
+      if (requesterFetchError) throw new Error('Failed to fetch recipient balance')
+
+      // Double-check balance
+      const currentBalance = senderData.balance || 0
+      if (currentBalance < request.amount) {
+        addToast({
+          type: 'error',
+          title: 'Solde Insuffisant',
+          message: `Vous n'avez pas assez de fonds pour accepter cette demande`,
+          duration: 5000,
+        })
+        setProcessingRequest(null)
+        return
+      }
+
+      // Step 2: Update balances (deduct from sender)
+      const { error: senderBalanceError } = await supabase
+        .from('profiles')
+        .update({
+          balance: currentBalance - request.amount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', currentUser.id)
+
+      if (senderBalanceError) {
+        console.error('Error updating sender balance:', senderBalanceError)
+        throw new Error('Failed to deduct funds from your account')
+      }
+
+      // Step 3: Update balances (add to requester)
+      const { error: requesterBalanceError } = await supabase
+        .from('profiles')
+        .update({
+          balance: (requesterData.balance || 0) + request.amount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', request.requester_id)
+
+      if (requesterBalanceError) {
+        console.error('Error updating requester balance:', requesterBalanceError)
+        // Rollback sender balance
+        await supabase.from('profiles').update({ balance: currentBalance }).eq('id', currentUser.id)
+        throw new Error('Failed to add funds to recipient account')
+      }
+
+      // Step 4: Update the funds request status
       const { error: updateError } = await supabase
         .from('funds_requests')
         .update({ status: 'accepted' })
         .eq('id', request.id)
 
-      if (updateError) throw updateError
+      if (updateError) {
+        console.error('Error updating request status:', updateError)
+        // Rollback both balances
+        await supabase.from('profiles').update({ balance: currentBalance }).eq('id', currentUser.id)
+        await supabase.from('profiles').update({ balance: requesterData.balance }).eq('id', request.requester_id)
+        throw new Error('Failed to update request status')
+      }
 
+      // Step 5: Create transaction records
       const reference = `TRF-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`.toUpperCase()
 
-      const { error: sendTxError } = await supabase
-        .from('transactions')
-        .insert({
-          user_id: currentUser.id,
-          type: 'transfer_send',
-          amount: request.amount,
-          status: 'completed',
-          reference: reference,
-          description: request.description || `Transfert à ${request.metadata.requester_username}`,
-          metadata: {
-            recipient_id: request.requester_id,
-            recipient_username: request.metadata.requester_username,
-            transfer_type: 'funds_request',
-            funds_request_id: request.id,
-          },
-        })
-
-      if (sendTxError) throw sendTxError
-
-      const { error: receiveTxError } = await supabase
-        .from('transactions')
-        .insert({
-          user_id: request.requester_id,
-          type: 'transfer_receive',
-          amount: request.amount,
-          status: 'completed',
-          reference: `${reference}-RECV`,
-          description: request.description || `Transfert de ${currentUser.id}`,
-          metadata: {
-            sender_id: currentUser.id,
-            sender_username: currentUser.id,
-            transfer_type: 'funds_request',
-            funds_request_id: request.id,
-          },
-        })
-
-      if (receiveTxError) throw receiveTxError
-
-      await supabase.rpc('update_balance', {
+      // Create sender transaction
+      const { error: sendTxError } = await supabase.from('transactions').insert({
         user_id: currentUser.id,
-        amount: -request.amount,
-      })
-
-      await supabase.rpc('update_balance', {
-        user_id: request.requester_id,
+        type: 'transfer_send',
         amount: request.amount,
+        status: 'completed',
+        reference: reference,
+        description: request.description || `Transfert à ${request.metadata.requester_username}`,
+        metadata: {
+          recipient_id: request.requester_id,
+          recipient_username: request.metadata.requester_username,
+          transfer_type: 'funds_request',
+          funds_request_id: request.id,
+        },
       })
 
+      if (sendTxError) {
+        console.error('Error creating sender transaction:', sendTxError)
+      }
+
+      // Create receiver transaction
+      const { error: receiveTxError } = await supabase.from('transactions').insert({
+        user_id: request.requester_id,
+        type: 'transfer_receive',
+        amount: request.amount,
+        status: 'completed',
+        reference: `${reference}-RECV`,
+        description: request.description || `Transfert de ${request.metadata.recipient_username}`,
+        metadata: {
+          sender_id: currentUser.id,
+          sender_username: request.metadata.recipient_username,
+          transfer_type: 'funds_request',
+          funds_request_id: request.id,
+        },
+      })
+
+      if (receiveTxError) {
+        console.error('Error creating receiver transaction:', receiveTxError)
+      }
+
+      // Step 6: Update UI and show success
       addToast({
         type: 'success',
         title: 'Demande Acceptée! ✅',
@@ -217,13 +288,17 @@ export default function FundsRequestsPanel({
         duration: 5000,
       })
 
+      // Refresh balance in parent component
       onBalanceUpdate()
+
+      // Refresh requests list
+      await fetchAllRequests()
     } catch (error) {
       console.error('Error accepting funds request:', error)
       addToast({
         type: 'error',
         title: 'Erreur',
-        message: 'Impossible d\'accepter la demande',
+        message: error instanceof Error ? error.message : "Impossible d'accepter la demande",
         duration: 5000,
       })
     } finally {
@@ -235,10 +310,7 @@ export default function FundsRequestsPanel({
     setProcessingRequest(requestId)
 
     try {
-      const { error } = await supabase
-        .from('funds_requests')
-        .update({ status: 'rejected' })
-        .eq('id', requestId)
+      const { error } = await supabase.from('funds_requests').update({ status: 'rejected' }).eq('id', requestId)
 
       if (error) throw error
 
@@ -265,10 +337,7 @@ export default function FundsRequestsPanel({
     setProcessingRequest(requestId)
 
     try {
-      const { error } = await supabase
-        .from('funds_requests')
-        .update({ status: 'cancelled' })
-        .eq('id', requestId)
+      const { error } = await supabase.from('funds_requests').update({ status: 'cancelled' }).eq('id', requestId)
 
       if (error) throw error
 
@@ -283,7 +352,7 @@ export default function FundsRequestsPanel({
       addToast({
         type: 'error',
         title: 'Erreur',
-        message: 'Impossible d\'annuler la demande',
+        message: "Impossible d'annuler la demande",
         duration: 5000,
       })
     } finally {
@@ -341,21 +410,23 @@ export default function FundsRequestsPanel({
   const pendingIncomingCount = incomingRequests.filter((r) => r.status === 'pending').length
   const pendingOutgoingCount = outgoingRequests.filter((r) => r.status === 'pending').length
 
-  if (!isOpen) return null
+  if (!isOpen && !isAnimating) return null
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden">
       {/* Backdrop with fade animation */}
       <div
-        className="absolute inset-0 bg-black transition-opacity duration-300 ease-in-out"
-        style={{ opacity: isOpen ? 0.5 : 0 }}
+        className={`absolute inset-0 bg-black transition-opacity duration-300 ease-in-out ${
+          isOpen ? 'opacity-50' : 'opacity-0'
+        }`}
         onClick={onClose}
       />
 
-      {/* Panel with slide animation */}
+      {/* Panel with slide animation - 25% width on desktop, full screen on mobile */}
       <div
-        className="absolute right-0 top-0 h-full w-96 bg-white shadow-2xl transform transition-transform duration-300 ease-in-out"
-        style={{ transform: isOpen ? 'translateX(0)' : 'translateX(100%)' }}
+        className={`absolute right-0 top-0 h-full w-full md:w-1/4 md:min-w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out ${
+          isOpen ? 'translate-x-0' : 'translate-x-full'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex flex-col h-full">
@@ -384,13 +455,13 @@ export default function FundsRequestsPanel({
               <span className="flex items-center justify-center">
                 Reçues
                 {pendingIncomingCount > 0 && (
-                  <span className="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full min-w-6">
+                  <span className="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full min-w-6 animate-pulse">
                     {pendingIncomingCount}
                   </span>
                 )}
               </span>
               {activeTab === 'incoming' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></div>
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 transition-all duration-200"></div>
               )}
             </button>
             <button
@@ -402,13 +473,13 @@ export default function FundsRequestsPanel({
               <span className="flex items-center justify-center">
                 Envoyées
                 {pendingOutgoingCount > 0 && (
-                  <span className="ml-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full min-w-6">
+                  <span className="ml-2 bg-yellow-500 text-white text-xs px-2 py-1 rounded-full min-w-6 animate-pulse">
                     {pendingOutgoingCount}
                   </span>
                 )}
               </span>
               {activeTab === 'outgoing' && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-600"></div>
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-green-600 transition-all duration-200"></div>
               )}
             </button>
           </div>
@@ -435,10 +506,11 @@ export default function FundsRequestsPanel({
               </div>
             ) : (
               <div className="p-4 space-y-4">
-                {currentRequests.map((request) => (
+                {currentRequests.map((request, index) => (
                   <div
                     key={request.id}
-                    className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition-all duration-200"
+                    className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:shadow-md transition-all duration-200 animate-fadeIn"
+                    style={{ animationDelay: `${index * 50}ms` }}
                   >
                     {/* Header */}
                     <div className="flex items-start justify-between mb-3">
@@ -467,9 +539,7 @@ export default function FundsRequestsPanel({
 
                     {/* Description */}
                     {request.description && (
-                      <p className="text-sm text-gray-600 mb-3 bg-gray-50 rounded-lg p-3">
-                        {request.description}
-                      </p>
+                      <p className="text-sm text-gray-600 mb-3 bg-gray-50 rounded-lg p-3">{request.description}</p>
                     )}
 
                     {/* Actions & Info */}
@@ -489,7 +559,7 @@ export default function FundsRequestsPanel({
                             <button
                               onClick={() => handleAcceptRequest(request)}
                               disabled={processingRequest === request.id || (currentUser?.balance || 0) < request.amount}
-                              className="bg-green-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-green-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                              className="bg-green-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-green-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:scale-105 active:scale-95"
                             >
                               {processingRequest === request.id ? (
                                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mx-2" />
@@ -500,7 +570,7 @@ export default function FundsRequestsPanel({
                             <button
                               onClick={() => handleRejectRequest(request.id)}
                               disabled={processingRequest === request.id}
-                              className="bg-red-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-red-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                              className="bg-red-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-red-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:scale-105 active:scale-95"
                             >
                               {processingRequest === request.id ? (
                                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mx-2" />
@@ -514,7 +584,7 @@ export default function FundsRequestsPanel({
                           <button
                             onClick={() => handleCancelRequest(request.id)}
                             disabled={processingRequest === request.id}
-                            className="bg-gray-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-gray-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                            className="bg-gray-600 text-white py-2 px-4 rounded-lg text-sm font-medium hover:bg-gray-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:scale-105 active:scale-95"
                           >
                             {processingRequest === request.id ? (
                               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mx-2" />
@@ -546,6 +616,23 @@ export default function FundsRequestsPanel({
           </div>
         </div>
       </div>
+
+      <style jsx>{`
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .animate-fadeIn {
+          animation: fadeIn 0.3s ease-out forwards;
+          opacity: 0;
+        }
+      `}</style>
     </div>
   )
 }

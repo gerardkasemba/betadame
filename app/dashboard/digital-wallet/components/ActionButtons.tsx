@@ -7,9 +7,14 @@ import { ArrowDown, ArrowUp, HandCoins } from 'lucide-react'
 interface ActionButtonsProps {
   onRequestFundsClick: () => void
   pendingRequestsCount: number
+  hasNewRequest: boolean
 }
 
-export default function ActionButtons({ onRequestFundsClick, pendingRequestsCount }: ActionButtonsProps) {
+export default function ActionButtons({ 
+  onRequestFundsClick, 
+  pendingRequestsCount, 
+  hasNewRequest 
+}: ActionButtonsProps) {
   return (
     <div className="grid grid-cols-3 gap-2 mb-6">
       {/* Deposit Button */}
@@ -41,14 +46,16 @@ export default function ActionButtons({ onRequestFundsClick, pendingRequestsCoun
       {/* Request Funds Button */}
       <button
         onClick={onRequestFundsClick}
-        className="group flex items-center justify-center p-3 bg-white border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-all duration-200 hover:shadow-sm relative"
+        className="group relative flex items-center justify-center p-3 bg-white border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-all duration-200 hover:shadow-sm"
       >
         <div className="flex flex-col items-center space-y-1">
-          <div className="p-1.5 bg-purple-100 rounded-lg group-hover:bg-purple-500 transition-colors relative">
+          <div className="relative p-1.5 bg-purple-100 rounded-lg group-hover:bg-purple-500 transition-colors">
             <HandCoins className="h-4 w-4 text-purple-600 group-hover:text-white" />
+            
+            {/* Pending requests count badge */}
             {pendingRequestsCount > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
-                {pendingRequestsCount}
+              <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center border-2 border-white font-medium shadow-sm">
+                {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
               </span>
             )}
           </div>
@@ -56,6 +63,20 @@ export default function ActionButtons({ onRequestFundsClick, pendingRequestsCoun
             Demandes
           </span>
         </div>
+
+        {/* New request notification pulse animation - positioned on the button corner */}
+        {hasNewRequest && (
+          <div className="absolute -top-1 -right-1 z-10">
+            <div className="relative">
+              {/* Outer pulse ring */}
+              <div className="absolute -inset-1 animate-ping">
+                <div className="w-3 h-3 bg-red-500 rounded-full opacity-75"></div>
+              </div>
+              {/* Inner solid dot */}
+              <div className="relative w-3 h-3 bg-red-600 rounded-full border-2 border-white"></div>
+            </div>
+          </div>
+        )}
       </button>
     </div>
   )

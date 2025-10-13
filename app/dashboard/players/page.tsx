@@ -205,7 +205,7 @@ export default function UsersPage() {
       <div className="bg-white rounded-2xl shadow-lg p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground font-heading flex items-center">
+            <h1 className="text-2xl font-bold text-gray-900 font-heading flex items-center">
               <Users className="h-6 w-6 mr-3 text-primary" />
               Répertoire des Joueurs
             </h1>
@@ -236,7 +236,7 @@ export default function UsersPage() {
                 placeholder="Entrez un nom d'utilisateur..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+                className="w-full pl-10 pr-4 text-gray-600 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
               />
             </div>
           </div>
@@ -250,7 +250,7 @@ export default function UsersPage() {
               id="region"
               value={filters.region}
               onChange={(e) => setFilters(prev => ({ ...prev, region: e.target.value }))}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="w-full px-4 py-2 text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
             >
               {regions.map(region => (
                 <option key={region.value} value={region.value}>
@@ -269,7 +269,7 @@ export default function UsersPage() {
               id="sort"
               value={filters.sortBy}
               onChange={(e) => setFilters(prev => ({ ...prev, sortBy: e.target.value }))}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="w-full px-4 py-2 text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
             >
               {sortOptions.map(option => (
                 <option key={option.value} value={option.value}>
@@ -292,7 +292,7 @@ export default function UsersPage() {
               value={filters.minGames}
               onChange={(e) => setFilters(prev => ({ ...prev, minGames: parseInt(e.target.value) || 0 }))}
               min="0"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="w-full px-4 py-2 text-gray-600 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
             />
           </div>
 
@@ -307,7 +307,7 @@ export default function UsersPage() {
               onChange={(e) => setFilters(prev => ({ ...prev, minWinRate: parseInt(e.target.value) || 0 }))}
               min="0"
               max="100"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+              className="w-full px-4 py-2 border text-gray-600 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
             />
           </div>
 
@@ -369,7 +369,7 @@ export default function UsersPage() {
                       {getRankBadge(index)}
                     </div>
                     <div>
-                      <h3 className="font-semibold text-foreground text-lg">{user.username}</h3>
+                      <h3 className="font-semibold text-gray-900 text-lg">{user.username}</h3>
                       <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getRegionColor(user.region)}`}>
                         <MapPin className="h-3 w-3 mr-1" />
                         {fr.regions[user.region as keyof typeof fr.regions] || 'Autre'}
@@ -385,7 +385,7 @@ export default function UsersPage() {
                       <Gamepad2 className="h-3 w-3" />
                       <span>Parties</span>
                     </div>
-                    <div className="font-bold text-foreground">{user.stats?.total_games || 0}</div>
+                    <div className="font-bold text-gray-900">{user.stats?.total_games || 0}</div>
                   </div>
 
                   <div className="text-center">
@@ -393,7 +393,7 @@ export default function UsersPage() {
                       <Trophy className="h-3 w-3" />
                       <span>Victoires</span>
                     </div>
-                    <div className="font-bold text-foreground">{user.stats?.total_wins || 0}</div>
+                    <div className="font-bold text-gray-900">{user.stats?.total_wins || 0}</div>
                   </div>
 
                   <div className="text-center">
@@ -401,7 +401,7 @@ export default function UsersPage() {
                       <Star className="h-3 w-3" />
                       <span>Taux</span>
                     </div>
-                    <div className="font-bold text-foreground">{user.stats?.win_rate || 0}%</div>
+                    <div className="font-bold text-gray-900">{user.stats?.win_rate || 0}%</div>
                   </div>
 
                   <div className="text-center">
@@ -409,7 +409,7 @@ export default function UsersPage() {
                       <Award className="h-3 w-3" />
                       <span>Gains</span>
                     </div>
-                    <div className="font-bold text-foreground">{user.stats?.total_winnings || 0}€</div>
+                    <div className="font-bold text-gray-900">{user.stats?.total_winnings || 0}$</div>
                   </div>
                 </div>
 

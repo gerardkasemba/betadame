@@ -91,7 +91,7 @@ export default function DashboardPage() {
         // FIXED: Include id in the profile query
         supabase
           .from('profiles')
-          .select('id, balance, username, region, phone_number, created_at')
+          .select('id, balance, username, region, state, phone_number, created_at')
           .eq('id', user.id)
           .single(),
 
@@ -209,7 +209,7 @@ export default function DashboardPage() {
       const creatorIds = recentGamesData?.map(game => game.created_by).filter(Boolean) || []
       const { data: creatorProfiles } = creatorIds.length > 0 ? await supabase
         .from('profiles')
-        .select('id, username')
+        .select('id, username, state')
         .in('id', creatorIds) : { data: [] }
 
       // Format recent games
@@ -402,7 +402,7 @@ export default function DashboardPage() {
               </button>
             </div>
             <p className="text-blue-100">
-              Niveau {stats.playerLevel} • {profile?.region} • 
+              Niveau {stats.playerLevel} • {profile?.state} • 
               Membre depuis {new Date(profile?.created_at || Date.now()).toLocaleDateString('fr-FR')}
             </p>
             {refreshing && (

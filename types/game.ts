@@ -23,6 +23,7 @@ export interface Profile {
   balance: number
   username: string
   region: string
+  state: string
   phone_number: string
   created_at: string
 }

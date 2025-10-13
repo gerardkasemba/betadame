@@ -82,7 +82,7 @@ function StatCard({ title, value, icon, color }: { title: string; value: string;
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-gray-600">{title}</p>
-          <p className="text-2xl font-bold text-foreground mt-1">{value}</p>
+          <p className="text-2xl font-bold text-gray-900 mt-1">{value}</p>
         </div>
         <div className={`p-3 rounded-full ${colorClasses[color as keyof typeof colorClasses]}`}>
           {icon}
@@ -632,10 +632,48 @@ export default function StatsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="bg-white rounded-2xl shadow-lg p-6">
-        <div className="flex items-center justify-between">
+      <div className="bg-white rounded-2xl shadow-lg p-4 sm:p-6">
+        {/* Mobile: Stacked layout */}
+        <div className="block sm:hidden space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <BarChart3 className="h-5 w-5 mr-2 text-primary" />
+              <h1 className="text-xl font-bold text-gray-900 font-heading">
+                Mes Statistiques
+              </h1>
+            </div>
+          </div>
+          
+          <p className="text-gray-600 text-sm -mt-2">
+            Suivez votre progression et vos performances
+          </p>
+          
+          {/* Time Range Filter - Mobile */}
+          <div className="flex space-x-1 bg-gray-100 rounded-lg p-1">
+            {[
+              { value: 'week', label: '7 jours', mobileLabel: '7j' },
+              { value: 'month', label: '30 jours', mobileLabel: '30j' },
+              { value: 'all', label: 'Tout le temps', mobileLabel: 'Tout' }
+            ].map((range) => (
+              <button
+                key={range.value}
+                onClick={() => setTimeRange(range.value as any)}
+                className={`flex-1 px-2 py-2 rounded-md text-xs font-medium transition-colors ${
+                  timeRange === range.value
+                    ? 'bg-white text-primary shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {range.mobileLabel}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Desktop: Side by side layout */}
+        <div className="hidden sm:flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground font-heading flex items-center">
+            <h1 className="text-2xl font-bold text-gray-900 font-heading flex items-center">
               <BarChart3 className="h-6 w-6 mr-3 text-primary" />
               Mes Statistiques
             </h1>
@@ -644,7 +682,7 @@ export default function StatsPage() {
             </p>
           </div>
           
-          {/* Time Range Filter */}
+          {/* Time Range Filter - Desktop */}
           <div className="flex space-x-2 bg-gray-100 rounded-lg p-1">
             {[
               { value: 'week', label: '7 jours' },
@@ -672,7 +710,7 @@ export default function StatsPage() {
         {/* Player Level */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-foreground flex items-center">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
               <Star className="h-5 w-5 mr-2 text-yellow-500" />
               Niveau {stats.player_level}
             </h3>
@@ -695,7 +733,7 @@ export default function StatsPage() {
         <div className="bg-white rounded-2xl shadow-lg p-6">
           <div className="text-center">
             <Crown className="h-8 w-8 text-yellow-500 mx-auto mb-2" />
-            <div className="text-2xl font-bold text-foreground">#{stats.rank_position}</div>
+            <div className="text-2xl font-bold text-gray-900">#{stats.rank_position}</div>
             <p className="text-gray-600">Classement Global</p>
             <p className="text-sm text-gray-500 mt-1">
               Sur {stats.total_players} joueurs
@@ -794,7 +832,7 @@ export default function StatsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Daily Progress - Last 7 Days */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
             <Activity className="h-5 w-5 mr-2 text-primary" />
             Activité des 7 Derniers Jours
           </h3>
@@ -884,7 +922,7 @@ export default function StatsPage() {
 
         {/* Achievements */}
         <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
             <Shield className="h-5 w-5 mr-2 text-primary" />
             Mes Succès
           </h3>
@@ -893,7 +931,7 @@ export default function StatsPage() {
               stats.achievements.map((achievement, index) => (
                 <div key={index} className="flex items-center space-x-3 p-3 bg-gradient-to-r from-primary/10 to-secondary/10 rounded-lg hover:from-primary/20 hover:to-secondary/20 transition-colors">
                   <Trophy className="h-5 w-5 text-yellow-500" />
-                  <span className="font-medium text-foreground">{achievement}</span>
+                  <span className="font-medium text-gray-900">{achievement}</span>
                 </div>
               ))
             ) : (
@@ -909,7 +947,7 @@ export default function StatsPage() {
 
       {/* Performance Metrics */}
       <div className="bg-white rounded-2xl shadow-lg p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-6">Indicateurs de Performance</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-6">Indicateurs de Performance</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="text-center">
             <div className="text-3xl font-bold text-primary mb-2">
@@ -957,7 +995,7 @@ export default function StatsPage() {
   <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
     <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
       <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-foreground flex items-center">
+        <h2 className="text-2xl font-bold text-gray-900 flex items-center">
           <Trophy className="h-6 w-6 mr-3 text-primary" />
           Historique des Parties
         </h2>
@@ -1082,7 +1120,7 @@ export default function StatsPage() {
           <div className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full max-h-[95vh] overflow-hidden">
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-bold text-foreground flex items-center">
+                <h2 className="text-2xl font-bold text-gray-900 flex items-center">
                   <Trophy className="h-6 w-6 mr-3 text-primary" />
                   État Final de la Partie
                 </h2>
