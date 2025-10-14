@@ -426,11 +426,21 @@ export default function GamePage() {
 
     try {
       // First, delete any existing selections for this user
-      await supabase
+      const { error: deleteError } = await supabase
         .from('piece_selections')
         .delete()
         .eq('game_room_id', gameRoomId)
         .eq('user_id', userProfile.id);
+
+      if (deleteError) {
+        console.error('Error deleting previous selection:', {
+          error: deleteError,
+          message: deleteError.message,
+          details: deleteError.details,
+          hint: deleteError.hint,
+          code: deleteError.code
+        });
+      }
 
       if (!position) return;
 
@@ -441,7 +451,8 @@ export default function GamePage() {
         position: dbPosition,
         validMoves: dbValidMoves,
         playerNumber,
-        userId: userProfile.id
+        userId: userProfile.id,
+        gameRoomId
       });
 
       const { data, error } = await supabase
@@ -456,7 +467,13 @@ export default function GamePage() {
         .select();
 
       if (error) {
-        console.error('Error broadcasting selection:', error);
+        console.error('Error broadcasting selection:', {
+          error,
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
       } else {
         console.log('Selection broadcasted successfully:', data);
       }
@@ -613,36 +630,36 @@ export default function GamePage() {
     }
   };
 
-const loadInitialSelections = async () => {
-  if (!userProfile || !gameRoomId) return;
+  const loadInitialSelections = async () => {
+    if (!userProfile || !gameRoomId) return;
 
-  try {
-    console.log('Loading initial selections for game:', gameRoomId);
-    
-    const { data: selections, error } = await supabase
-      .from('piece_selections')
-      .select('*')
-      .eq('game_room_id', gameRoomId);
+    try {
+      console.log('Loading initial selections for game:', gameRoomId);
+      
+      const { data: selections, error } = await supabase
+        .from('piece_selections')
+        .select('*')
+        .eq('game_room_id', gameRoomId);
 
-    console.log('Initial selections loaded:', selections);
+      console.log('Initial selections loaded:', selections);
 
-    if (error) {
-      console.error('Error loading selections:', error);
-      return;
+      if (error) {
+        console.error('Error loading selections:', error);
+        return;
+      }
+
+      if (selections && selections.length > 0) {
+        selections.forEach(selection => {
+          if (selection.user_id !== userProfile.id) {
+            console.log('Processing opponent selection:', selection);
+            handleOpponentSelection(selection);
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Exception loading selections:', err);
     }
-
-    if (selections && selections.length > 0) {
-      selections.forEach(selection => {
-        if (selection.user_id !== userProfile.id) {
-          console.log('Processing opponent selection:', selection);
-          handleOpponentSelection(selection);
-        }
-      });
-    }
-  } catch (err) {
-    console.error('Exception loading selections:', err);
-  }
-};
+  };
 
   const saveGameResult = async (winnerId: string | null) => {
     if (!gameRoom || !userProfile) return;
