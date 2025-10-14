@@ -9,7 +9,7 @@ export default async function HomePage() {
   const session = await getSession()
 
   return (
-    <div className="bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
+    <div className="">
       <Header />
       {/* Hero Section */}
       <section className="pt-32 pb-20 px-4 sm:px-6 lg:px-8">
@@ -77,7 +77,7 @@ export default async function HomePage() {
 
             {/* Right Content - Hero Image */}
             <div className="relative">
-              <div className="bg-gradient-to-br bg-amber-800 rounded-3xl p-8 shadow-2xl transform rotate-2 hover:rotate-0 transition-transform duration-500">
+              <div className="bg-gradient-to-br bg-gray-800 rounded-3xl p-8 shadow-2xl transform rotate-2 hover:rotate-0 transition-transform duration-500">
                 <div className="bg-white rounded-2xl p-6 shadow-inner">
                   <div className="grid grid-cols-8 gap-1 mb-4">
                     {Array.from({ length: 64 }).map((_, i) => (
@@ -85,8 +85,8 @@ export default async function HomePage() {
                         key={i}
                         className={`aspect-square rounded ${
                           Math.floor(i / 8) % 2 === i % 2 
-                            ? 'bg-amber-100' 
-                            : 'bg-amber-800'
+                            ? 'bg-gray-100' 
+                            : 'bg-gray-800'
                         }`}
                       />
                     ))}
