@@ -1,4 +1,4 @@
-// app/dashboard/game/p/[id]/page.tsx
+// app/dashboard/game/p/[id]/page.tsx - Updated with fixed checkers logic
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client';
 import { GameAnalysis } from '@/lib/games';
 import GameBoard from '../../components/GameBoard';
 
+// Utility function for position conversion
 const PositionConverter = {
   toDb: (row: number, col: number): number => {
     return row * 10 + col;
@@ -66,15 +67,13 @@ interface ExtendedGameState extends GameState {
   selectedPiece: Position | null;
   validMoves: Move[];
   mustContinueJumpFrom?: Position;
-  continuingJumpPosition?: Position;
+  continuingJumpPosition?: Position; // Backward compatibility alias
 }
 
-interface AnimatedMove {
+interface OpponentMove {
   from: Position;
   to: Position;
-  piece: Piece;
   timestamp: number;
-  player: string;
 }
 
 interface GameResult {
@@ -204,7 +203,8 @@ export default function GamePage() {
   const [isReady, setIsReady] = useState(false);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
-  const [animatedMoves, setAnimatedMoves] = useState<AnimatedMove[]>([]);
+  const [animatingPiece, setAnimatingPiece] = useState<{ piece: Piece; from: Position; to: Position } | null>(null);
+  const [opponentMoves, setOpponentMoves] = useState<OpponentMove[]>([]);
   const [showGameResult, setShowGameResult] = useState<GameResult | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(30);
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -257,6 +257,7 @@ export default function GamePage() {
   useEffect(() => {
     if (!gameRoomId || !gameRoom) return;
 
+    // Clean up existing channels
     if (gameChannelRef.current) {
       gameChannelRef.current.unsubscribe();
     }
@@ -264,6 +265,7 @@ export default function GamePage() {
       selectionChannelRef.current.unsubscribe();
     }
 
+    // Game room updates channel
     gameChannelRef.current = supabase
       .channel(`game-room-${gameRoomId}`)
       .on(
@@ -298,32 +300,35 @@ export default function GamePage() {
       )
       .subscribe();
 
+    // Selection updates channel with ALL events
     selectionChannelRef.current = supabase
       .channel(`game-selections-${gameRoomId}`)
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*', // Listen to ALL events (INSERT, UPDATE, DELETE)
           schema: 'public',
           table: 'piece_selections',
           filter: `game_room_id=eq.${gameRoomId}`,
         },
-        (payload) => handleOpponentSelection(payload.new)
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'piece_selections',
-          filter: `game_room_id=eq.${gameRoomId}`,
-        },
-        () => {
-          setOpponentSelectedPiece(null);
-          setOpponentValidMoves([]);
+        (payload) => {
+          console.log('Selection channel event:', payload.eventType, payload);
+          
+          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            handleOpponentSelection(payload.new);
+          } else if (payload.eventType === 'DELETE') {
+            // Only clear if it was the opponent's selection
+            if (payload.old && userProfile && payload.old.user_id !== userProfile.id) {
+              console.log('Opponent deselected');
+              setOpponentSelectedPiece(null);
+              setOpponentValidMoves([]);
+            }
+          }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Selection channel status:', status);
+      });
 
     return () => {
       if (gameChannelRef.current) {
@@ -333,7 +338,7 @@ export default function GamePage() {
         selectionChannelRef.current.unsubscribe();
       }
     };
-  }, [gameRoomId, gameRoom?.id]);
+  }, [gameRoomId, gameRoom?.id, userProfile]);
 
   useEffect(() => {
     if (gameRoom?.status !== 'playing' || gameState.status === 'finished') {
@@ -358,13 +363,13 @@ export default function GamePage() {
   }, [isMyTurn, gameRoom?.status, gameState.status, gameState.currentPlayer, isProcessingMove]);
 
   useEffect(() => {
-    if (animatedMoves.length > 0) {
+    if (opponentMoves.length > 0) {
       const timer = setTimeout(() => {
-        setAnimatedMoves(prev => prev.slice(1));
+        setOpponentMoves(prev => prev.slice(1));
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [animatedMoves]);
+  }, [opponentMoves]);
 
   useEffect(() => {
     if (userProfile && gameRoomId) {
@@ -388,7 +393,6 @@ export default function GamePage() {
 
   useEffect(() => {
     if (gameState.status === 'finished') {
-      setAnimatedMoves([]);
       broadcastPieceSelection(null, []);
       setOpponentSelectedPiece(null);
       setOpponentValidMoves([]);
@@ -400,44 +404,28 @@ export default function GamePage() {
   }, []);
 
   const handleNewMove = useCallback(async (move: any) => {
-    if (!userProfile || !gameRoom) return;
+    if (!userProfile || move.user_id === userProfile.id) return;
 
     const from = PositionConverter.fromDb(move.from_position);
     const to = PositionConverter.fromDb(move.to_position);
 
-    const piece = gameState.board[from.row]?.[from.col];
-    if (!piece) return;
+    setOpponentMoves(prev => [...prev, { from, to, timestamp: Date.now() }]);
 
-    const animatedMove: AnimatedMove = {
-      from,
-      to,
-      piece,
-      timestamp: Date.now(),
-      player: move.user_id
-    };
-
-    setAnimatedMoves(prev => [...prev, animatedMove]);
-
-    if (move.user_id !== userProfile.id) {
-      const fromNotation = PositionConverter.toNotation(from.row, from.col);
-      const toNotation = PositionConverter.toNotation(to.row, to.col);
-      showToast(getTranslation('opponentMove', { from: fromNotation, to: toNotation }), 'info');
-    }
+    const fromNotation = PositionConverter.toNotation(from.row, from.col);
+    const toNotation = PositionConverter.toNotation(to.row, to.col);
+    showToast(getTranslation('opponentMove', { from: fromNotation, to: toNotation }), 'info');
 
     setOpponentSelectedPiece(null);
     setOpponentValidMoves([]);
 
-    setTimeout(() => {
-      setAnimatedMoves(prev => prev.filter(m => m.timestamp !== animatedMove.timestamp));
-    }, 1000);
-
     await fetchGameRoom();
-  }, [userProfile, gameRoom, gameState.board, showToast]);
+  }, [userProfile, showToast]);
 
   const broadcastPieceSelection = useCallback(async (position: Position | null, validMoves: Position[]) => {
     if (!userProfile || !gameRoomId || !playerNumber) return;
 
     try {
+      // First, delete any existing selections for this user
       await supabase
         .from('piece_selections')
         .delete()
@@ -449,7 +437,14 @@ export default function GamePage() {
       const dbPosition = PositionConverter.toDb(position.row, position.col);
       const dbValidMoves = validMoves.map(pos => PositionConverter.toDb(pos.row, pos.col));
 
-      await supabase
+      console.log('Broadcasting selection:', {
+        position: dbPosition,
+        validMoves: dbValidMoves,
+        playerNumber,
+        userId: userProfile.id
+      });
+
+      const { data, error } = await supabase
         .from('piece_selections')
         .insert({
           game_room_id: gameRoomId,
@@ -457,26 +452,42 @@ export default function GamePage() {
           player_number: playerNumber,
           position: dbPosition,
           valid_moves: dbValidMoves
-        });
+        })
+        .select();
+
+      if (error) {
+        console.error('Error broadcasting selection:', error);
+      } else {
+        console.log('Selection broadcasted successfully:', data);
+      }
     } catch (err) {
-      // Silent fail
+      console.error('Exception in broadcastPieceSelection:', err);
     }
   }, [userProfile, gameRoomId, playerNumber]);
 
   const handleOpponentSelection = useCallback(async (selection: any) => {
-    if (!userProfile || selection.user_id === userProfile.id) return;
+    if (!userProfile || selection.user_id === userProfile.id) {
+      console.log('Ignoring own selection');
+      return;
+    }
+
+    console.log('Received opponent selection:', selection);
 
     if (selection.position !== null && selection.position !== undefined) {
       const selectedPos = PositionConverter.fromDb(selection.position);
+      console.log('Opponent selected piece at:', selectedPos);
       setOpponentSelectedPiece(selectedPos);
       
       if (selection.valid_moves && Array.isArray(selection.valid_moves)) {
         const validMoves = selection.valid_moves.map((pos: number) => PositionConverter.fromDb(pos));
+        console.log('Opponent valid moves:', validMoves);
         setOpponentValidMoves(validMoves);
       } else {
+        console.log('No valid moves in selection');
         setOpponentValidMoves([]);
       }
     } else {
+      console.log('Opponent deselected piece');
       setOpponentSelectedPiece(null);
       setOpponentValidMoves([]);
     }
@@ -540,6 +551,7 @@ export default function GamePage() {
         type = isWinner ? 'win' : 'lose';
         break;
       case 'draw':
+        // This should rarely happen now
         title = getTranslation('draw');
         message = 'Match nul - les mises sont retournées';
         type = 'draw';
@@ -601,31 +613,42 @@ export default function GamePage() {
     }
   };
 
-  const loadInitialSelections = async () => {
-    if (!userProfile || !gameRoomId) return;
+const loadInitialSelections = async () => {
+  if (!userProfile || !gameRoomId) return;
 
-    try {
-      const { data: selections } = await supabase
-        .from('piece_selections')
-        .select('*')
-        .eq('game_room_id', gameRoomId);
+  try {
+    console.log('Loading initial selections for game:', gameRoomId);
+    
+    const { data: selections, error } = await supabase
+      .from('piece_selections')
+      .select('*')
+      .eq('game_room_id', gameRoomId);
 
-      if (selections && selections.length > 0) {
-        selections.forEach(selection => {
-          if (selection.user_id !== userProfile.id) {
-            handleOpponentSelection(selection);
-          }
-        });
-      }
-    } catch (err) {
-      // Silent fail
+    console.log('Initial selections loaded:', selections);
+
+    if (error) {
+      console.error('Error loading selections:', error);
+      return;
     }
-  };
+
+    if (selections && selections.length > 0) {
+      selections.forEach(selection => {
+        if (selection.user_id !== userProfile.id) {
+          console.log('Processing opponent selection:', selection);
+          handleOpponentSelection(selection);
+        }
+      });
+    }
+  } catch (err) {
+    console.error('Exception loading selections:', err);
+  }
+};
 
   const saveGameResult = async (winnerId: string | null) => {
     if (!gameRoom || !userProfile) return;
 
     try {
+      // Calculate final game analysis if not already available
       let finalAnalysis = gameAnalysis;
       if (!finalAnalysis) {
         try {
@@ -644,7 +667,7 @@ export default function GamePage() {
         final_board_state: ProfessionalCheckersGame.serializeGameState(gameState),
         total_turns: gameState.turnNumber,
         total_moves: gameState.moveHistory.length,
-        game_analysis: finalAnalysis,
+        game_analysis: finalAnalysis, // Now always has analysis or null
         bet_amount: gameRoom.bet_amount,
         prize_distributed: totalBetAmount,
         game_duration: Math.floor((Date.now() - new Date(gameRoom.created_at).getTime()) / 1000),
@@ -655,6 +678,7 @@ export default function GamePage() {
       await updatePlayerRatings(winnerId, participants);
     } catch (err) {
       console.error('Error saving game result:', err);
+      // Silent fail but log the error
     }
   };
 
@@ -897,7 +921,7 @@ export default function GamePage() {
       selectedPiece: prev?.selectedPiece || null,
       validMoves: prev?.validMoves || [],
       mustContinueJumpFrom: newGameState.mustContinueJumpFrom,
-      continuingJumpPosition: newGameState.mustContinueJumpFrom,
+      continuingJumpPosition: newGameState.mustContinueJumpFrom, // Sync alias
     }));
 
     setTimeLeft(30);
@@ -966,6 +990,7 @@ export default function GamePage() {
     }
   };
 
+  // FIXED: Proper piece selection with continuing jump validation
   const handleCellClick = async (row: number, col: number) => {
     if (!userProfile || !gameRoom || gameRoom.status !== 'playing') {
       showToast(`La partie est ${gameRoom?.status || 'waiting'}`);
@@ -987,6 +1012,7 @@ export default function GamePage() {
       return;
     }
 
+    // If we have a selected piece and are trying to move it
     if (gameState.selectedPiece) {
       const move = gameState.validMoves.find((m: Move) => 
         m.from.row === gameState.selectedPiece!.row &&
@@ -1009,6 +1035,7 @@ export default function GamePage() {
       }
     }
 
+    // FIXED: Check if there's a continuing jump position (supports both property names)
     const continuingJump = gameState.mustContinueJumpFrom || gameState.continuingJumpPosition;
     if (continuingJump) {
       if (row !== continuingJump.row || col !== continuingJump.col) {
@@ -1056,6 +1083,7 @@ export default function GamePage() {
     }
   };
 
+  // FIXED: Complete move validation and error recovery with multi-jump support
   const makeMove = async (move: Move) => {
     if (!userProfile || !gameRoom || isProcessingMove) return;
 
@@ -1068,10 +1096,12 @@ export default function GamePage() {
         throw new Error('No piece at starting position');
       }
 
+      // Check sufficient balance
       if (gameRoom.bet_amount > 0 && userProfile.balance < gameRoom.bet_amount) {
         throw new Error('Solde insuffisant');
       }
 
+      // Proper move validation
       const isValidMove = gameState.validMoves.some(
         (validMove: Move) => 
           validMove.from.row === move.from.row && 
@@ -1085,6 +1115,7 @@ export default function GamePage() {
         throw new Error('Move is not valid');
       }
 
+      // Validate captured pieces exist
       if (move.captures && move.captures.length > 0) {
         for (const capturePos of move.captures) {
           const capturedPiece = gameState.board[capturePos.row][capturePos.col];
@@ -1094,6 +1125,7 @@ export default function GamePage() {
         }
       }
 
+      // Calculate new game state locally first
       const newGameState: ExtendedGameState = {
         ...ProfessionalCheckersGame.makeMove(gameState, move),
         selectedPiece: null,
@@ -1101,23 +1133,19 @@ export default function GamePage() {
       };
       tempBoardState = newGameState;
 
+      // Show king promotion animation
       if (move.promotedToKing) {
         showToast(getTranslation('promotedToKing'), 'success');
       }
 
-      const animatedMove: AnimatedMove = {
+      // Animate after validation
+      setAnimatingPiece({
+        piece,
         from: move.from,
         to: move.to,
-        piece,
-        timestamp: Date.now(),
-        player: userProfile.id
-      };
+      });
 
-      setAnimatedMoves(prev => [...prev, animatedMove]);
-
-      await new Promise(resolve => setTimeout(resolve, 800));
-
-      setAnimatedMoves(prev => prev.filter(m => m.timestamp !== animatedMove.timestamp));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       const gameStateCheck = checkCurrentGameState(newGameState);
       
@@ -1131,6 +1159,7 @@ export default function GamePage() {
         };
       }
 
+      // Proper turn number calculation with multi-jump support
       const { data: latestMoves } = await supabase
         .from('game_moves')
         .select('turn_number, move_number')
@@ -1144,15 +1173,19 @@ export default function GamePage() {
       if (latestMoves && latestMoves.length > 0) {
         const lastMove = latestMoves[0];
         
+        // FIXED: Check both property names for continuing jump
         const isContinuingJump = finalGameState.mustContinueJumpFrom || finalGameState.continuingJumpPosition;
         
         if (isContinuingJump) {
+          // Continuing jump - same turn number
           turnNumber = lastMove.turn_number;
           moveNumber = lastMove.move_number + 1;
         } else if (newGameState.currentPlayer === gameState.currentPlayer) {
+          // Multi-jump completed in same turn
           turnNumber = lastMove.turn_number;
           moveNumber = lastMove.move_number + 1;
         } else {
+          // Turn changed
           turnNumber = lastMove.turn_number + 1;
           moveNumber = 1;
         }
@@ -1174,6 +1207,7 @@ export default function GamePage() {
         }
       }
 
+      // Retry mechanism for network failures
       let retryCount = 0;
       let roomUpdateSuccess = false;
       
@@ -1217,8 +1251,9 @@ export default function GamePage() {
         selectedPiece: null,
         validMoves: [],
         mustContinueJumpFrom: finalGameState.mustContinueJumpFrom,
-        continuingJumpPosition: finalGameState.mustContinueJumpFrom,
+        continuingJumpPosition: finalGameState.mustContinueJumpFrom, // Sync alias
       });
+      setAnimatingPiece(null);
       setTimeLeft(30);
 
       showToast(getTranslation('moveRecorded'), 'success');
@@ -1227,12 +1262,15 @@ export default function GamePage() {
         if (finalGameState.winner) {
           await handleGameFinish(finalGameState.winner, gameStateCheck.reason as any);
         } else {
+          // This should not happen anymore since we always determine a winner
           showGameResultMessage('draw');
         }
       }
     } catch (err) {
-      setAnimatedMoves([]);
+      // Proper error state cleanup
+      setAnimatingPiece(null);
       
+      // Rollback to previous state on error
       if (tempBoardState === null) {
         setGameState(prev => ({
           ...prev,
@@ -1258,6 +1296,7 @@ export default function GamePage() {
   const checkCurrentGameState = (state: ExtendedGameState): { shouldEnd: boolean; winner: number | null; reason: string } => {
     const validMoves = ProfessionalCheckersGame.findAllValidMoves(state);
     
+    // Check if current player has no valid moves - opponent wins
     if (validMoves.length === 0) {
       return {
         shouldEnd: true,
@@ -1266,6 +1305,7 @@ export default function GamePage() {
       };
     }
     
+    // Check for draw conditions (max moves, repetition, etc.)
     const shouldEnd = ProfessionalCheckersGame.checkGameEndConditions(
       state.board,
       state.currentPlayer,
@@ -1275,11 +1315,12 @@ export default function GamePage() {
     );
     
     if (shouldEnd) {
+      // FIXED: No true draws - determine winner by position
       const winner = ProfessionalCheckersGame.determineWinnerByPosition(state.board);
       return {
         shouldEnd: true,
         winner: winner,
-        reason: 'material'
+        reason: 'material' // Game reached max moves, winner determined by position
       };
     }
     
@@ -1343,7 +1384,9 @@ export default function GamePage() {
     if (!gameRoom || !userProfile) return;
 
     try {
+      // FIXED: Handle draw case - return money to both players
       if (winnerPlayerNumber === null) {
+        // Return bet amount to each player
         const betAmount = gameRoom.bet_amount;
         
         for (const participant of participants) {
@@ -1380,6 +1423,7 @@ export default function GamePage() {
         return;
       }
 
+      // Normal case: winner takes all
       const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
       if (!winnerParticipant) return;
 
@@ -1895,13 +1939,13 @@ export default function GamePage() {
 
             <GameBoard
               gameState={gameState}
-              animatedMoves={animatedMoves}
+              animatingPiece={animatingPiece}
+              opponentMoves={opponentMoves}
               isMyTurn={isMyTurn}
               gameRoom={gameRoom}
               onCellClick={handleCellClick}
               opponentSelectedPiece={opponentSelectedPiece}
               opponentValidMoves={opponentValidMoves}
-              currentPlayer={userProfile?.id}
             />
 
             {gameAnalysis && gameRoom.status === 'playing' && (

@@ -763,7 +763,7 @@ export default function InterCardGamePage() {
   const renderOpponentCards = () => {
     const cardCount = opponentHand.length;
     
-    if (cardCount > 8) {
+    if (cardCount > 4) {
       return (
         <div className="flex justify-center items-center gap-1">
           {opponentHand.slice(0, 3).map((_, i) => (
@@ -786,7 +786,7 @@ export default function InterCardGamePage() {
     return (
       <div className="flex justify-center gap-1 flex-wrap">
         {opponentHand.map((_, i) => (
-          <div key={i} className="w-20 h-26 bg-blue-900 rounded border border-white shadow"></div>
+          <div key={i} className="w-12 h-20 bg-blue-900 rounded border border-white shadow"></div>
         ))}
       </div>
     );

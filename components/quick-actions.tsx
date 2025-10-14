@@ -4,21 +4,21 @@ import { Plus, Users, Trophy, Zap } from 'lucide-react'
 
 const actions = [
   {
-    title: 'Partie Rapide',
+    title: 'Créer une Salle',
     description: 'Démarrer une partie immédiatement',
     icon: <Zap className="h-6 w-6" />,
     href: '/dashboard/game?quick=true',
     bgColor: 'bg-[#fecf6a]',
     iconColor: 'text-white',
   },
-  {
-    title: 'Créer une Salle',
-    description: 'Configurer une partie personnalisée',
-    icon: <Plus className="h-6 w-6" />,
-    href: '/dashboard/game?create=true',
-    bgColor: 'bg-[#194a8d]',
-    iconColor: 'text-white',
-  },
+  // {
+  //   title: 'Créer une Salle',
+  //   description: 'Configurer une partie personnalisée',
+  //   icon: <Plus className="h-6 w-6" />,
+  //   href: '/dashboard/game?create=true',
+  //   bgColor: 'bg-[#194a8d]',
+  //   iconColor: 'text-white',
+  // },
   // {
   //   title: 'Tournoi',
   //   description: 'Rejoindre un tournoi',
