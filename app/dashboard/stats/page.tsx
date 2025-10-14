@@ -174,7 +174,7 @@ function GameBoardDisplay({ boardState }: { boardState: any }) {
 
   return (
     <div className="inline-block">
-      <div className="grid grid-cols-10 gap-0 border-4 border-gray-800 rounded-lg overflow-hidden bg-amber-800">
+      <div className="grid grid-cols-10 gap-0 border-4 border-gray-800 rounded-lg overflow-hidden bg-gray-800">
         {Array.from({ length: BOARD_SIZE }).map((_, row) =>
           Array.from({ length: BOARD_SIZE }).map((_, col) => {
             const isDark = (row + col) % 2 === 1;
@@ -203,8 +203,8 @@ function GameBoardDisplay({ boardState }: { boardState: any }) {
                 key={`${row}-${col}`}
                 className={`w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center ${
                   isDark 
-                    ? 'bg-amber-800 hover:bg-amber-900' 
-                    : 'bg-amber-100 hover:bg-amber-200'
+                    ? 'bg-gray-800 hover:bg-gray-900' 
+                    : 'bg-white hover:bg-gray-200'
                 } transition-colors relative`}
               >
                 {piecePlayer && (

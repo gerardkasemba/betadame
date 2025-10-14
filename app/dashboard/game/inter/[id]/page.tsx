@@ -60,6 +60,7 @@ export default function InterCardGamePage() {
     currentCard: null,
     playerTurn: 1,
     demandedValue: null,
+    demandingPlayer: null,
     status: "En attente du début de la partie",
     gameOver: false
   });
@@ -75,7 +76,6 @@ export default function InterCardGamePage() {
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [showDemandModal, setShowDemandModal] = useState(false);
   const [pendingDemandState, setPendingDemandState] = useState<InterCardGameState | null>(null);
-  const [demandingPlayer, setDemandingPlayer] = useState<number | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(60);
 
@@ -98,7 +98,7 @@ export default function InterCardGamePage() {
   // Timer effect
   useEffect(() => {
     if (gameRoom?.status !== 'playing' || gameState.gameOver || !isMyTurn) {
-      setTimeLeft(30);
+      setTimeLeft(60);
       return;
     }
 
@@ -161,10 +161,17 @@ export default function InterCardGamePage() {
   const handleTimeout = async () => {
     if (!userProfile || !gameRoom || gameState.gameOver || !playerNumber) return;
 
-    try {
+    if (gameState.demandedValue) {
+      // Timeout during a demand: force a draw
+      const demandingPlayerNum = gameState.demandingPlayer || opponentPlayerNumber;
+      const newState = InterCardGame.processDemandResponse(gameState, demandingPlayerNum, null);
+      await updateGameRoomState(newState);
+      showToast('Temps écoulé! Vous piochez une carte.', 'info');
+    } else {
+      // Normal timeout: opponent wins
       const winnerPlayerNumber = opponentPlayerNumber;
       const winnerUserId = participants.find(p => p.player_number === winnerPlayerNumber)?.user_id || null;
-      
+
       await supabase
         .from('game_rooms')
         .update({
@@ -173,9 +180,7 @@ export default function InterCardGamePage() {
         })
         .eq('id', gameRoomId);
 
-      // Update balances
       if (winnerUserId && totalBetAmount > 0) {
-        // Get winner's current balance
         const { data: winnerProfile } = await supabase
           .from('profiles')
           .select('balance, games_played')
@@ -183,17 +188,15 @@ export default function InterCardGamePage() {
           .single();
 
         if (winnerProfile) {
-          // Winner gets the pot
           await supabase
             .from('profiles')
-            .update({ 
+            .update({
               balance: Number(winnerProfile.balance) + totalBetAmount,
               games_played: (winnerProfile.games_played || 0) + 1
             })
             .eq('id', winnerUserId);
         }
 
-        // Update loser's stats (current player who timed out)
         const { data: loserProfile } = await supabase
           .from('profiles')
           .select('games_played')
@@ -203,7 +206,7 @@ export default function InterCardGamePage() {
         if (loserProfile) {
           await supabase
             .from('profiles')
-            .update({ 
+            .update({
               games_played: (loserProfile.games_played || 0) + 1
             })
             .eq('id', userProfile.id);
@@ -211,8 +214,6 @@ export default function InterCardGamePage() {
       }
 
       showToast('Temps écoulé! Vous avez perdu la partie.', 'error');
-    } catch (err) {
-      showToast('Erreur lors du traitement du timeout');
     }
   };
 
@@ -337,13 +338,13 @@ export default function InterCardGamePage() {
                     loadedState.currentCard : null,
         playerTurn: typeof loadedState.playerTurn === 'number' ? loadedState.playerTurn : 1,
         demandedValue: loadedState.demandedValue || null,
+        demandingPlayer: loadedState.demandingPlayer || null,
         status: loadedState.status || "Partie en cours",
         gameOver: Boolean(loadedState.gameOver)
       };
 
       setGameState(repairedState);
       
-      // Check if there's a demand waiting for current player to respond
       if (repairedState.demandedValue && playerNumber === repairedState.playerTurn && !isSpectator) {
         checkDemandResponse(repairedState);
       }
@@ -357,39 +358,28 @@ export default function InterCardGamePage() {
     }
   };
 
-  // Check if player needs to respond to a demand
   const checkDemandResponse = (state: InterCardGameState) => {
     if (!state.demandedValue || !playerNumber) return;
-    
-    const canFulfill = InterCardGame.canFulfillDemand(state, playerNumber);
-    
-    if (!canFulfill) {
-      // Auto-draw if cannot fulfill demand
-      setTimeout(() => {
-        handleCannotFulfillDemand(state);
-      }, 1000);
+
+    if (playerNumber === state.demandingPlayer) {
+      showToast(
+        `Vous devez jouer ${state.demandedValue}, un 8, ou un Joker. Si vous ne l'avez pas, vous piochez automatiquement.`,
+        'info'
+      );
     } else {
-      // Player can fulfill - check if they have an 8 to counter
-      const has8 = currentPlayerHand.some(card => card.value === "8");
-      const hasJoker = currentPlayerHand.some(card => card.suit === "🃏");
-      const hasDemandedCard = currentPlayerHand.some(card => card.value === state.demandedValue);
-      
-      if (has8 || hasJoker) {
-        showToast(`⚠️ Vous devez jouer ${state.demandedValue} (ou jouer un 8/Joker pour annuler)`, 'info');
-      } else if (hasDemandedCard) {
-        showToast(`⚠️ Vous devez jouer ${state.demandedValue} uniquement!`, 'info');
+      const canFulfill = InterCardGame.canFulfillDemand(state, playerNumber);
+      if (!canFulfill) {
+        showToast(
+          `Vous n'avez pas ${state.demandedValue}. Cliquez sur "Piocher" pour continuer.`,
+          'info'
+        );
+      } else {
+        showToast(
+          `Jouez ${state.demandedValue}, un 8, ou un Joker, ou cliquez sur "Piocher".`,
+          'info'
+        );
       }
     }
-  };
-
-  const handleCannotFulfillDemand = async (state: InterCardGameState) => {
-    showToast(`Vous n'avez pas ${state.demandedValue}. Vous piochez 1 carte.`, 'info');
-    
-    // Get the demanding player (the one who is NOT current turn)
-    const demandingPlayerNum = opponentPlayerNumber;
-    
-    const newState = InterCardGame.processDemandResponse(state, demandingPlayerNum, null);
-    await updateGameRoomState(newState);
   };
 
   const updateGameRoomState = async (newGameState: InterCardGameState) => {
@@ -403,6 +393,7 @@ export default function InterCardGamePage() {
       pile: newGameState.pile || [],
       currentCard: newGameState.currentCard || null,
       demandedValue: newGameState.demandedValue || null,
+      demandingPlayer: newGameState.demandingPlayer || null,
       status: newGameState.status || "Partie en cours",
       playerTurn: newGameState.playerTurn || 1,
       gameOver: newGameState.gameOver || false
@@ -419,8 +410,11 @@ export default function InterCardGamePage() {
       .eq('id', gameRoomId);
 
     if (error) {
-      showToast('Erreur lors de la mise à jour de la partie');
+      console.error('Update error:', error);
+      showToast('Erreur lors de la mise à jour de la partie. Veuillez réessayer.', 'error');
+      return false;
     }
+    return true;
   };
 
   const getWinnerUserId = (state: InterCardGameState): string | null => {
@@ -478,7 +472,7 @@ export default function InterCardGamePage() {
     }
 
     const cardsToPlay = selectedCards.map(i => currentPlayerHand[i]).filter(card => card !== null && card !== undefined);
-    
+
     if (cardsToPlay.length === 0) {
       showToast('Aucune carte valide sélectionnée');
       return;
@@ -493,7 +487,7 @@ export default function InterCardGamePage() {
     const newPlayerHand = currentPlayerHand.filter((card, i) => !selectedCards.includes(i) && card !== null && card !== undefined);
     const lastCard = cardsToPlay[cardsToPlay.length - 1];
     const newPile = [...gameState.pile.filter(card => card !== null && card !== undefined), ...cardsToPlay];
-    
+
     let newGameState: InterCardGameState = {
       ...gameState,
       pile: newPile,
@@ -506,16 +500,15 @@ export default function InterCardGamePage() {
       newGameState.player2Hand = newPlayerHand;
     }
 
-    // Check for win condition
     const winner = InterCardGame.checkWinCondition(newGameState);
     if (winner) {
       newGameState.gameOver = true;
       newGameState.status = `🎉 Joueur ${winner} gagne!`;
-      
-      // Get winner's user ID
+      newGameState.demandedValue = null;
+      newGameState.demandingPlayer = null;
+
       const winnerUserId = participants.find(p => p.player_number === winner)?.user_id || null;
-      
-      // Update game room with winner
+
       const { error: roomError } = await supabase
         .from('game_rooms')
         .update({
@@ -529,9 +522,7 @@ export default function InterCardGamePage() {
         console.error('Error updating game room:', roomError);
       }
 
-      // Update balances
       if (winnerUserId && totalBetAmount > 0) {
-        // Get winner's current balance
         const { data: winnerProfile } = await supabase
           .from('profiles')
           .select('balance, games_played')
@@ -539,21 +530,15 @@ export default function InterCardGamePage() {
           .single();
 
         if (winnerProfile) {
-          // Winner gets the pot
-          const { error: winnerBalanceError } = await supabase
+          await supabase
             .from('profiles')
-            .update({ 
+            .update({
               balance: Number(winnerProfile.balance) + totalBetAmount,
               games_played: (winnerProfile.games_played || 0) + 1
             })
             .eq('id', winnerUserId);
-
-          if (winnerBalanceError) {
-            console.error('Error updating winner balance:', winnerBalanceError);
-          }
         }
 
-        // Update loser's stats
         const loserId = participants.find(p => p.user_id !== winnerUserId)?.user_id;
         if (loserId) {
           const { data: loserProfile } = await supabase
@@ -563,20 +548,15 @@ export default function InterCardGamePage() {
             .single();
 
           if (loserProfile) {
-            const { error: loserError } = await supabase
+            await supabase
               .from('profiles')
-              .update({ 
+              .update({
                 games_played: (loserProfile.games_played || 0) + 1
               })
               .eq('id', loserId);
-
-            if (loserError) {
-              console.error('Error updating loser stats:', loserError);
-            }
           }
         }
 
-        // Refresh current user's profile if they won
         if (winnerUserId === userProfile?.id) {
           const { data: updatedProfile } = await supabase
             .from('profiles')
@@ -596,30 +576,25 @@ export default function InterCardGamePage() {
     }
 
     const effects = InterCardGame.getSpecialCardEffects(cardsToPlay);
-    
-    // Handle special cards
+
     if (effects.has8) {
-      // Show demand modal for player to choose
       setPendingDemandState(newGameState);
-      setDemandingPlayer(playerNumber);
       setShowDemandModal(true);
       setSelectedCards([]);
     } else if (effects.has2 || effects.has10 || effects.hasJoker || effects.hasAce) {
-      // These cards: opponent draws/skips, current player plays again
       const opponentHand = playerNumber === 1 ? newGameState.player2Hand : newGameState.player1Hand;
       const opponent = opponentPlayerNumber;
-      
-      // Calculate draw amount based on number of cards played
+
       const drawAmount = InterCardGame.calculateDrawAmount(effects, cardsToPlay);
-      
+
       if (drawAmount > 0 && (effects.has2 || effects.has10 || effects.hasJoker)) {
         const { newHand, newDeck, newPile: updatedPile } = InterCardGame.drawCards(
-          opponentHand, 
-          newGameState.deck, 
-          newGameState.pile, 
+          opponentHand,
+          newGameState.deck,
+          newGameState.pile,
           drawAmount
         );
-        
+
         if (opponent === 1) {
           newGameState.player1Hand = newHand;
         } else {
@@ -628,11 +603,11 @@ export default function InterCardGamePage() {
         newGameState.deck = newDeck;
         newGameState.pile = updatedPile;
       }
-      
+
       newGameState.status = InterCardGame.getSpecialCardStatus(effects, true, cardsToPlay);
       newGameState.demandedValue = null;
-      // Current player plays again - don't switch turns
-      
+      newGameState.demandingPlayer = null;
+
       const cardCount = cardsToPlay.length;
       if (cardCount > 1) {
         showToast(`${cardCount} cartes spéciales! Adversaire pioche ${drawAmount} cartes. Vous rejouez!`, 'success');
@@ -642,10 +617,12 @@ export default function InterCardGamePage() {
       setSelectedCards([]);
       await updateGameRoomState(newGameState);
     } else {
-      // Normal play - switch turns
       newGameState.playerTurn = opponentPlayerNumber;
       newGameState.status = `Tour du Joueur ${opponentPlayerNumber}`;
-      newGameState.demandedValue = null;
+      if (gameState.demandedValue && playerNumber === gameState.demandingPlayer) {
+        newGameState.demandedValue = null;
+        newGameState.demandingPlayer = null;
+      }
       setTimeLeft(60);
       setSelectedCards([]);
       await updateGameRoomState(newGameState);
@@ -653,18 +630,12 @@ export default function InterCardGamePage() {
   };
 
   const handleDemandSelection = async (demandedValue: string) => {
-    if (!pendingDemandState || !demandingPlayer) return;
+    if (!pendingDemandState || !playerNumber) return;
     
-    const newGameState: InterCardGameState = {
-      ...pendingDemandState,
-      demandedValue: demandedValue,
-      playerTurn: opponentPlayerNumber, // Switch to opponent to respond
-      status: `Joueur ${demandingPlayer} demande: ${demandedValue}!`
-    };
+    const newGameState = InterCardGame.setDemand(pendingDemandState, playerNumber, demandedValue);
     
     setShowDemandModal(false);
     setPendingDemandState(null);
-    setDemandingPlayer(null);
     
     await updateGameRoomState(newGameState);
     showToast(`Vous demandez: ${demandedValue}`, 'info');
@@ -673,26 +644,32 @@ export default function InterCardGamePage() {
   const handleDraw = async (): Promise<void> => {
     if (!isMyTurn || gameState.gameOver) return;
 
-    const result = InterCardGame.drawCards(
-      currentPlayerHand, 
-      gameState.deck, 
-      gameState.pile, 
-      1
-    );
+    let newGameState: InterCardGameState;
 
-    const newGameState: InterCardGameState = {
-      ...gameState,
-      deck: result.newDeck,
-      pile: result.newPile,
-      playerTurn: opponentPlayerNumber,
-      status: `Joueur ${playerNumber} pioche. Tour du Joueur ${opponentPlayerNumber}`,
-      demandedValue: null
-    };
-
-    if (playerNumber === 1) {
-      newGameState.player1Hand = result.newHand;
+    if (gameState.demandedValue) {
+      const demandingPlayerNum = gameState.demandingPlayer || opponentPlayerNumber;
+      newGameState = InterCardGame.processDemandResponse(gameState, demandingPlayerNum, null);
     } else {
-      newGameState.player2Hand = result.newHand;
+      const result = InterCardGame.drawCards(
+        currentPlayerHand,
+        gameState.deck,
+        gameState.pile,
+        1
+      );
+      newGameState = {
+        ...gameState,
+        deck: result.newDeck,
+        pile: result.newPile,
+        playerTurn: opponentPlayerNumber,
+        status: `Joueur ${playerNumber} pioche. Tour du Joueur ${opponentPlayerNumber}`,
+        demandedValue: null,
+        demandingPlayer: null
+      };
+      if (playerNumber === 1) {
+        newGameState.player1Hand = result.newHand;
+      } else {
+        newGameState.player2Hand = result.newHand;
+      }
     }
 
     setSelectedCards([]);
@@ -720,9 +697,7 @@ export default function InterCardGamePage() {
       return;
     }
 
-    // Update balances
     if (winnerUserId && totalBetAmount > 0) {
-      // Get winner's current balance
       const { data: winnerProfile } = await supabase
         .from('profiles')
         .select('balance, games_played')
@@ -730,7 +705,6 @@ export default function InterCardGamePage() {
         .single();
 
       if (winnerProfile) {
-        // Winner gets the pot
         await supabase
           .from('profiles')
           .update({ 
@@ -740,7 +714,6 @@ export default function InterCardGamePage() {
           .eq('id', winnerUserId);
       }
 
-      // Update resigning player's stats
       const { data: loserProfile } = await supabase
         .from('profiles')
         .select('games_played')
@@ -787,26 +760,21 @@ export default function InterCardGamePage() {
     router.push('/dashboard');
   };
 
-  // Responsive card display logic
   const renderOpponentCards = () => {
     const cardCount = opponentHand.length;
     
-    // Show stacked cards when opponent has more than 8 cards
     if (cardCount > 8) {
       return (
         <div className="flex justify-center items-center gap-1">
-          {/* Show first 3 cards as individual */}
           {opponentHand.slice(0, 3).map((_, i) => (
             <div key={i} className="w-12 h-16 bg-blue-900 rounded border border-white shadow"></div>
           ))}
           
-          {/* Stacked cards indicator */}
           <div className="relative ml-2">
             <div className="w-10 h-14 bg-blue-800 rounded border border-white shadow-lg"></div>
             <div className="absolute -top-1 -right-1 w-10 h-14 bg-blue-700 rounded border border-white shadow-lg transform rotate-6"></div>
             <div className="absolute -top-2 -right-2 w-10 h-14 bg-blue-600 rounded border border-white shadow-lg transform rotate-12"></div>
             
-            {/* Card count badge */}
             <div className="absolute -top-3 -right-3 bg-red-500 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center shadow-lg">
               +{cardCount - 3}
             </div>
@@ -815,41 +783,37 @@ export default function InterCardGamePage() {
       );
     }
     
-    // Show all cards when opponent has 8 or fewer cards
     return (
       <div className="flex justify-center gap-1 flex-wrap">
         {opponentHand.map((_, i) => (
-          <div key={i} className="w-8 h-12 bg-blue-900 rounded border border-white shadow"></div>
+          <div key={i} className="w-20 h-26 bg-blue-900 rounded border border-white shadow"></div>
         ))}
       </div>
     );
   };
 
-  // Responsive player hand display
   const renderPlayerHand = () => {
-    const cardCount = currentPlayerHand.length;
-    
     return (
       <div className="flex flex-wrap justify-center gap-2 mb-6">
         {currentPlayerHand.map((card, i) => {
-          // Check if card is playable when there's a demand
-          const isPlayable = !gameState.demandedValue || 
-                            card.value === gameState.demandedValue || 
-                            card.value === "8" || 
-                            card.suit === "🃏";
-          
+          const isPlayable =
+            !gameState.demandedValue ||
+            (playerNumber === gameState.demandingPlayer
+              ? card.value === gameState.demandedValue || card.value === "8" || card.suit === "🃏"
+              : card.value === gameState.demandedValue || card.value === "8" || card.suit === "🃏");
+
           return (
             <button
               key={i}
               onClick={() => toggleCardSelection(i)}
-              disabled={!isMyTurn || gameState.gameOver || Boolean(gameState.demandedValue && !isPlayable)}
+              disabled={!isMyTurn || gameState.gameOver || !isPlayable}
               className={`rounded-lg px-3 py-2 text-lg font-bold shadow-lg transition-all hover:scale-105 ${
                 selectedCards.includes(i)
                   ? 'bg-yellow-400 border-4 border-yellow-600 text-black'
-                  : gameState.demandedValue && !isPlayable
+                  : !isPlayable
                   ? 'bg-gray-300 text-gray-500 opacity-40 cursor-not-allowed'
                   : 'bg-white hover:bg-gray-100 text-black'
-              } ${!isMyTurn || gameState.gameOver ? 'opacity-50 cursor-not-allowed' : ''} min-w-14`}
+              } ${!isMyTurn || gameState.gameOver ? 'opacity-50 cursor-not-allowed' : ''} min-w-14 h-20`}
             >
               {card.value}{card.suit}
             </button>
@@ -869,7 +833,6 @@ export default function InterCardGamePage() {
 
   return (
     <div className="min-h-screen">
-      {/* Toast Notifications */}
       {toast && (
         <div
           className={`fixed top-4 right-4 z-50 max-w-sm ${
@@ -885,12 +848,12 @@ export default function InterCardGamePage() {
         </div>
       )}
 
-      {/* Demand Modal */}
       {showDemandModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-4 sm:p-6 max-w-md w-full">
             <h3 className="text-lg sm:text-xl font-bold mb-4 text-gray-900">Vous avez joué un 8!</h3>
-            <p className="text-sm sm:text-base text-gray-700 mb-4">Choisissez une valeur à demander:</p>
+            <p className="text-sm sm:text-base text-gray-700 mb-2">Choisissez une valeur à demander:</p>
+            <p className="text-xs text-red-600 mb-4 font-semibold">⚠️ Attention: Si votre adversaire pioche, vous devrez jouer cette carte!</p>
             <div className="grid grid-cols-4 gap-2">
               {values.filter(v => v !== "8").map(value => (
                 <button
@@ -906,7 +869,6 @@ export default function InterCardGamePage() {
         </div>
       )}
 
-      {/* Game Result Modal */}
       {showGameResult && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className={`bg-white rounded-lg p-6 sm:p-8 max-w-md w-full text-center ${
@@ -942,7 +904,6 @@ export default function InterCardGamePage() {
         </div>
       )}
 
-      {/* Resign Confirmation */}
       {showResignConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-4 sm:p-6 max-w-sm w-full">
@@ -967,10 +928,8 @@ export default function InterCardGamePage() {
       )}
 
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-xl border border-gray-200 overflow-hidden mb-4 sm:mb-6">
-          {/* Top Bar - Game Info */}
-          <div className=" px-4 sm:px-6 py-3">
+          <div className="px-4 sm:px-6 py-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 sm:gap-3">
                 <div className="bg-yellow-600 backdrop-blur-sm p-2 rounded-lg">
@@ -980,7 +939,7 @@ export default function InterCardGamePage() {
                   <h1 className="text-base sm:text-xl font-bold text-gray-900 truncate max-w-[150px] sm:max-w-none">
                     {gameRoom?.name || 'Jeux d\'Inter'}
                   </h1>
-                  <p className="text-xs sm:text-sm text-purple-100">
+                  <p className="text-xs sm:text-sm text-gray-500">
                     Mise: {gameRoom?.bet_amount || 0}$ • Pot: {totalBetAmount}$
                   </p>
                 </div>
@@ -996,10 +955,8 @@ export default function InterCardGamePage() {
             </div>
           </div>
 
-          {/* Main Info Section */}
           <div className="p-4 sm:p-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              {/* Game Status */}
               <div className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-3 sm:p-4 border border-gray-200">
                 <div className="flex items-center gap-2 mb-1">
                   <div className={`w-2 h-2 rounded-full ${
@@ -1020,7 +977,6 @@ export default function InterCardGamePage() {
                 </p>
               </div>
 
-              {/* Timer - Prominent Display */}
               {gameRoom?.status === 'playing' && (
                 <div className={`rounded-xl p-3 sm:p-4 border-2 ${
                   isMyTurn 
@@ -1043,7 +999,6 @@ export default function InterCardGamePage() {
                     </p>
                     <span className="text-sm text-gray-600">sec</span>
                   </div>
-                  {/* Progress Bar */}
                   <div className="w-full bg-gray-200 rounded-full h-1.5 mt-2">
                     <div 
                       className={`h-1.5 rounded-full transition-all duration-1000 ${
@@ -1055,7 +1010,6 @@ export default function InterCardGamePage() {
                 </div>
               )}
 
-              {/* Balance */}
               {userProfile && (
                 <div className="bg-gradient-to-br from-amber-50 to-yellow-100 rounded-xl p-3 sm:p-4 border border-yellow-200">
                   <div className="flex items-center gap-2 mb-1">
@@ -1068,7 +1022,6 @@ export default function InterCardGamePage() {
                 </div>
               )}
 
-              {/* Prize Pool */}
               <div className="bg-gradient-to-br from-purple-50 to-indigo-100 rounded-xl p-3 sm:p-4 border border-purple-200">
                 <div className="flex items-center gap-2 mb-1">
                   <Trophy className="h-4 w-4 text-purple-600" />
@@ -1080,7 +1033,6 @@ export default function InterCardGamePage() {
               </div>
             </div>
 
-            {/* Waiting Room */}
             {gameRoom?.status === 'waiting' && (
               <div className="mt-4 sm:mt-6 pt-4 sm:pt-6 border-t border-gray-200">
                 <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-xl p-4 border-2 border-yellow-300">
@@ -1131,12 +1083,9 @@ export default function InterCardGamePage() {
           </div>
         </div>
 
-        {/* Game Layout */}
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-          {/* Main Game Area */}
           <div className="xl:col-span-3">
-            <div className="bg-green-900  rounded-2xl p-6 shadow-lg mb-6">
-              {/* Opponent Area */}
+            <div className="bg-green-900 rounded-2xl p-6 shadow-lg mb-6">
               <div className="text-center mb-8">
                 <div className="text-white text-sm mb-2">
                   {participants.find(p => p.player_number === opponentPlayerNumber)?.profiles?.username || `Joueur ${opponentPlayerNumber}`} - {opponentHand.length} cartes
@@ -1144,40 +1093,66 @@ export default function InterCardGamePage() {
                 {renderOpponentCards()}
               </div>
               
-              {/* Current Card */}
               <div className="text-center my-8">
-                <div className="text-white text-xl mb-2">Carte actuelle</div>
-                <div className="inline-block bg-white rounded-lg px-8 py-6 text-4xl font-bold shadow-lg border-4 border-yellow-400">
-                  {gameState.currentCard ? `${gameState.currentCard.value}${gameState.currentCard.suit}` : '—'}
+                <div className="text-white text-xl mb-4">Carte actuelle</div>
+                <div className="flex justify-center items-center">
+                  <div className="relative">
+                    <div className="bg-white rounded-xl w-24 h-32 flex items-center justify-center shadow-2xl border-4 border-yellow-400 transform rotate-1 hover:rotate-0 transition-transform duration-300">
+                      <div className="text-center">
+                        {gameState.currentCard ? (
+                          <>
+                            <div className="text-3xl font-bold text-gray-900 leading-tight">
+                              {gameState.currentCard.value}
+                            </div>
+                            <div className="text-4xl mt-1">
+                              {gameState.currentCard.suit}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-4xl text-gray-400">—</div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="absolute -top-2 -left-2 w-6 h-6 bg-yellow-400 rounded-full opacity-60"></div>
+                    <div className="absolute -bottom-2 -right-2 w-6 h-6 bg-yellow-400 rounded-full opacity-60"></div>
+                  </div>
                 </div>
                 {gameState.demandedValue && (
-                  <div className="text-yellow-300 text-lg mt-2 font-semibold">
-                    Demande: {gameState.demandedValue}
+                  <div className="mt-4">
+                    <div className="text-yellow-300 text-lg font-semibold bg-black/30 rounded-full py-2 px-6 inline-block">
+                      🎯 Demande: {gameState.demandedValue}
+                    </div>
+                    {gameState.demandingPlayer && (
+                      <div className="text-white text-sm mt-2">
+                        Par Joueur {gameState.demandingPlayer}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Game Status */}
               <div className="text-center text-white text-lg mb-8 min-h-8 bg-black/30 rounded-lg py-3">
                 {gameState.status}
               </div>
 
-              {/* Player's Hand */}
               <div className="text-center">
                 <div className="text-white text-sm mb-2">
                   Votre main ({currentPlayerHand.length} cartes) - {participants.find(p => p.player_number === playerNumber)?.profiles?.username || `Joueur ${playerNumber}`}
                 </div>
                 
-                {/* Demand Warning */}
                 {gameState.demandedValue && isMyTurn && (
                   <div className="bg-red-500 text-white px-4 py-2 rounded-lg mb-3 font-bold animate-pulse">
-                    ⚠️ Vous devez jouer UNIQUEMENT: {gameState.demandedValue}, 8, ou Joker
+                    {playerNumber === gameState.demandingPlayer ? (
+                      <>⚠️ Vous devez jouer: {gameState.demandedValue}, 8, ou Joker (si vous n'avez pas, vous piochez automatiquement)</>
+                    ) : (
+                      <>⚠️ Vous devez jouer: {gameState.demandedValue}, 8, ou Joker, sinon piocher</>
+                    )}
                   </div>
                 )}
                 
                 {renderPlayerHand()}
 
-                {/* Action Buttons */}
                 {gameRoom?.status === 'playing' && !isSpectator && (
                   <div className="flex justify-center gap-4 flex-wrap">
                     <button
@@ -1189,9 +1164,9 @@ export default function InterCardGamePage() {
                     </button>
                     <button
                       onClick={handleDraw}
-                      disabled={!isMyTurn || gameState.gameOver || Boolean(gameState.demandedValue)}
+                      disabled={!isMyTurn || gameState.gameOver}
                       className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                      title={gameState.demandedValue ? "Impossible de piocher pendant une demande" : "Piocher une carte"}
+                      title="Piocher une carte"
                     >
                       Piocher
                     </button>
@@ -1207,7 +1182,6 @@ export default function InterCardGamePage() {
               </div>
             </div>
 
-            {/* Game Rules */}
             <div className="bg-white rounded-lg p-6 shadow-lg">
               <h3 className="font-bold text-lg mb-3 text-gray-900">Règles du Jeux d'Inter:</h3>
               <div className="grid md:grid-cols-2 gap-4 text-sm text-gray-700">
@@ -1221,8 +1195,9 @@ export default function InterCardGamePage() {
                 </div>
                 <div>
                   <ul className="space-y-2">
-                    <li><strong>8 (Inter-demande):</strong> Demandez une carte</li>
-                    <li className="text-red-600"><strong>⚠️ Règle stricte:</strong> Si adversaire n'a pas la carte et pioche, VOUS DEVEZ jouer UNIQUEMENT la carte demandée!</li>
+                    <li><strong>8 (Inter-demande):</strong> Demandez une valeur</li>
+                    <li><strong>Réponse à un 8:</strong> Jouez la valeur demandée, un 8, ou un Joker, ou piochez 1 carte</li>
+                    <li><strong>Si adversaire pioche:</strong> Vous devez jouer la carte demandée (ou piochez si vous ne l'avez pas)</li>
                     <li><strong>8 vs 8:</strong> Un 8 annule un autre 8 - nouvelle demande!</li>
                     <li><strong>Multi-cartes:</strong> Multipliez les effets!</li>
                   </ul>
@@ -1231,10 +1206,8 @@ export default function InterCardGamePage() {
             </div>
           </div>
 
-          {/* Sidebar */}
           <div className="space-y-6">
-            {/* Game Info */}
-            <div className="bg-white/90  rounded-2xl p-6 shadow-lg">
+            <div className="bg-white/90 rounded-2xl p-6 shadow-lg">
               <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                 <FaCrown className="mr-2" />
                 Détails de la partie
@@ -1288,8 +1261,7 @@ export default function InterCardGamePage() {
               </div>
             </div>
 
-            {/* Participants */}
-            <div className="bg-white/90  rounded-2xl p-6 shadow-lg">
+            <div className="bg-white/90 rounded-2xl p-6 shadow-lg">
               <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
                 <FaUserFriends className="mr-2" />
                 Participants

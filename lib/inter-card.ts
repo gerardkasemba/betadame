@@ -15,11 +15,13 @@ export interface GameState {
   player2Hand: Card[];
   pile: Card[];
   currentCard: Card | null;
-  playerTurn: number; // 1 or 2
+  playerTurn: number;
   demandedValue: string | null;
+  demandingPlayer: number | null; // New field to track who made the demand
   status: string;
   gameOver: boolean;
 }
+
 
 export class InterCardGame {
   static createDeck(): Card[] {
@@ -223,23 +225,21 @@ export class InterCardGame {
     const newDeck = this.createDeck();
     const player1Hand: Card[] = [];
     const player2Hand: Card[] = [];
-    
-    // Deal 4 cards to each player
+
     for (let i = 0; i < 4; i++) {
       const card1 = newDeck.pop();
       const card2 = newDeck.pop();
       if (card1) player1Hand.push(card1);
       if (card2) player2Hand.push(card2);
     }
-    
+
     const startCard = newDeck.pop();
-    
-    // Ensure we have a valid starting card
+
     const pile = startCard ? [startCard] : [];
     const currentCard = startCard || null;
-    
+
     console.log(`Game started with: Player 1 (${player1Hand.length} cards), Player 2 (${player2Hand.length} cards), Deck (${newDeck.length} cards), Current Card: ${currentCard ? currentCard.value + currentCard.suit : 'none'}`);
-    
+
     return {
       deck: newDeck,
       player1Hand,
@@ -248,6 +248,7 @@ export class InterCardGame {
       currentCard,
       playerTurn: 1,
       demandedValue: null,
+      demandingPlayer: null, // Initialize demandingPlayer
       status: "Tour du Joueur 1",
       gameOver: false
     };
@@ -341,8 +342,8 @@ export class InterCardGame {
       needsDemand = true; // Signal that a demand is needed
       newGameState.demandedValue = null; // Will be set by the UI
       newGameState.status = `Joueur ${currentPlayer} a joué un 8. Choisissez une valeur à demander.`;
-      // Turn temporarily switches to opponent to respond to demand
-      shouldSwitchTurn = true;
+      // Keep turn with current player until they make their demand
+      shouldSwitchTurn = false; // Don't switch yet - wait for demand to be set
     }
     else {
       // Normal card played, clear demand and switch turn
@@ -352,6 +353,35 @@ export class InterCardGame {
 
     return { newGameState, shouldSwitchTurn, needsDemand };
   }
+
+  // Set the demand after an 8 is played and switch turn to opponent
+    static setDemand(
+      gameState: GameState,
+      demandingPlayer: number,
+      demandedValue: string
+    ): GameState {
+      const opponent = this.getOpponent(demandingPlayer);
+      const newGameState = { ...gameState };
+
+      newGameState.demandedValue = demandedValue;
+      newGameState.demandingPlayer = demandingPlayer;
+      newGameState.playerTurn = opponent;
+      newGameState.status = `Joueur ${demandingPlayer} demande ${demandedValue}. Joueur ${opponent} doit jouer ${demandedValue}, un 8, ou un Joker, sinon piocher 1 carte.`;
+
+      return newGameState;
+    }
+
+    // Check if the demanding player has the card they demanded
+    static demandingPlayerHasCard(gameState: GameState): boolean {
+      if (!gameState.demandedValue || !gameState.demandingPlayer) return true;
+      
+      const demandingHand = this.getPlayerHand(gameState, gameState.demandingPlayer);
+      return demandingHand.some(card => 
+        card.value === gameState.demandedValue || 
+        card.value === "8" || 
+        card.suit === "🃏"
+      );
+    }
 
   // Check if opponent can fulfill the demand
   static canFulfillDemand(
@@ -375,42 +405,34 @@ export class InterCardGame {
     const opponent = this.getOpponent(demandingPlayer);
     const opponentHand = this.getPlayerHand(gameState, opponent);
     let newGameState = { ...gameState };
-    
-    // If opponent played cards in response to demand
+
     if (responseCards && responseCards.length > 0) {
-      // Remove played cards from opponent's hand
-      const newOpponentHand = opponentHand.filter(card => 
-        !responseCards.some(rc => rc.suit === card.suit && rc.value === card.value)
+      const newOpponentHand = opponentHand.filter(
+        card => !responseCards.some(rc => rc.suit === card.suit && rc.value === card.value)
       );
-      
+
       if (opponent === 1) {
         newGameState.player1Hand = newOpponentHand;
       } else {
         newGameState.player2Hand = newOpponentHand;
       }
-      
-      // Add cards to pile and update current card
+
       newGameState.pile = [...newGameState.pile, ...responseCards];
       newGameState.currentCard = responseCards[responseCards.length - 1];
-      
-      // Check if opponent played another 8 to cancel the demand
+
       const playedEffects = this.getSpecialCardEffects(responseCards);
       if (playedEffects.has8) {
-        // Opponent played an 8 to CANCEL the first 8
-        // Now the opponent makes a NEW demand
-        // Turn switches back to the original demanding player who must respond to the NEW demand
-        newGameState.status = `Joueur ${opponent} a joué un 8 pour annuler! En attente de la nouvelle demande.`;
-        newGameState.playerTurn = opponent; // Opponent stays to make their demand
-        newGameState.demandedValue = null; // Will be set when opponent makes new demand
+        newGameState.status = `Joueur ${opponent} a joué un 8 pour annuler! Choisissez une valeur à demander.`;
+        newGameState.playerTurn = opponent;
+        newGameState.demandedValue = null;
+        newGameState.demandingPlayer = opponent;
       } else {
-        // Opponent fulfilled the demand with the requested card
-        // Demand is cleared, game returns to normal
         newGameState.playerTurn = demandingPlayer;
-        newGameState.demandedValue = null; // CLEAR THE DEMAND - game returns to normal
+        newGameState.demandedValue = null;
+        newGameState.demandingPlayer = null;
         newGameState.status = `Joueur ${opponent} a joué ${this.getCardDescription(responseCards)}. Tour du Joueur ${demandingPlayer}.`;
       }
     } else {
-      // Opponent cannot fulfill demand, must draw 1 card
       const { newHand, newDeck, newPile } = this.drawCards(opponentHand, newGameState.deck, newGameState.pile, 1);
       if (opponent === 1) {
         newGameState.player1Hand = newHand;
@@ -419,12 +441,12 @@ export class InterCardGame {
       }
       newGameState.deck = newDeck;
       newGameState.pile = newPile;
-      
-      // Turn goes back to the demanding player
-      // BUT THE DEMAND STAYS ACTIVE - demanding player must now play the demanded card
+
       newGameState.playerTurn = demandingPlayer;
-      // KEEP demandedValue - do NOT clear it
-      newGameState.status = `Joueur ${opponent} n'a pas ${gameState.demandedValue}, pioche 1 carte. Joueur ${demandingPlayer} doit jouer ${gameState.demandedValue}.`;
+      // Keep demandedValue and demandingPlayer to restrict the demanding player's next move
+      newGameState.demandedValue = gameState.demandedValue;
+      newGameState.demandingPlayer = demandingPlayer;
+      newGameState.status = `Joueur ${opponent} a pioché 1 carte. Joueur ${demandingPlayer} doit jouer ${gameState.demandedValue}, un 8, ou un Joker.`;
     }
 
     return newGameState;
@@ -432,19 +454,23 @@ export class InterCardGame {
 
   // Validate if a move is legal
   static validateMove(
-    gameState: GameState, 
-    cardsToPlay: Card[], 
+    gameState: GameState,
+    cardsToPlay: Card[],
     playerNumber: number
   ): { isValid: boolean; error?: string } {
     if (cardsToPlay.length === 0) {
       return { isValid: false, error: "Aucune carte sélectionnée" };
     }
 
-    if (!this.canPlayMultiple(cardsToPlay, gameState.currentCard, gameState.demandedValue)) {
+    // If there's a demandedValue and the player is the demanding player, they must play the demanded value, 8, or Joker
+    if (gameState.demandedValue && playerNumber === gameState.demandingPlayer) {
+      if (!cardsToPlay.every(card => card.value === gameState.demandedValue || card.value === "8" || card.suit === "🃏")) {
+        return { isValid: false, error: `Vous devez jouer ${gameState.demandedValue}, un 8, ou un Joker` };
+      }
+    } else if (!this.canPlayMultiple(cardsToPlay, gameState.currentCard, gameState.demandedValue)) {
       return { isValid: false, error: "Vous ne pouvez pas jouer ces cartes" };
     }
 
-    // Check if all cards belong to the player's hand
     const playerHand = this.getPlayerHand(gameState, playerNumber);
     for (const card of cardsToPlay) {
       if (!playerHand.some(c => c.suit === card.suit && c.value === card.value)) {
@@ -454,6 +480,7 @@ export class InterCardGame {
 
     return { isValid: true };
   }
+
 }
 
 // Legacy function for backward compatibility

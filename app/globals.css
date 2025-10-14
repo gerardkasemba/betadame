@@ -42,3 +42,36 @@ body {
   @apply bg-background text-foreground font-sans;
 }
 
+@keyframes move-piece {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes draw-line {
+  from {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 1000;
+  }
+  to {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 0;
+  }
+}
+
+.animate-move-piece {
+  animation: move-piece 0.8s ease-in-out;
+}
+
+.animate-draw-line {
+  animation: draw-line 0.8s ease-in-out forwards;
+}

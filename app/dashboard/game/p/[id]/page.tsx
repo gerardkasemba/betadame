@@ -1,4 +1,4 @@
-// app/dashboard/game/p/[id]/page.tsx - Updated with fixed checkers logic
+// app/dashboard/game/p/[id]/page.tsx
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -9,7 +9,6 @@ import { createClient } from '@/lib/supabase/client';
 import { GameAnalysis } from '@/lib/games';
 import GameBoard from '../../components/GameBoard';
 
-// Utility function for position conversion
 const PositionConverter = {
   toDb: (row: number, col: number): number => {
     return row * 10 + col;
@@ -67,13 +66,15 @@ interface ExtendedGameState extends GameState {
   selectedPiece: Position | null;
   validMoves: Move[];
   mustContinueJumpFrom?: Position;
-  continuingJumpPosition?: Position; // Backward compatibility alias
+  continuingJumpPosition?: Position;
 }
 
-interface OpponentMove {
+interface AnimatedMove {
   from: Position;
   to: Position;
+  piece: Piece;
   timestamp: number;
+  player: string;
 }
 
 interface GameResult {
@@ -203,8 +204,7 @@ export default function GamePage() {
   const [isReady, setIsReady] = useState(false);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
-  const [animatingPiece, setAnimatingPiece] = useState<{ piece: Piece; from: Position; to: Position } | null>(null);
-  const [opponentMoves, setOpponentMoves] = useState<OpponentMove[]>([]);
+  const [animatedMoves, setAnimatedMoves] = useState<AnimatedMove[]>([]);
   const [showGameResult, setShowGameResult] = useState<GameResult | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(30);
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -358,13 +358,13 @@ export default function GamePage() {
   }, [isMyTurn, gameRoom?.status, gameState.status, gameState.currentPlayer, isProcessingMove]);
 
   useEffect(() => {
-    if (opponentMoves.length > 0) {
+    if (animatedMoves.length > 0) {
       const timer = setTimeout(() => {
-        setOpponentMoves(prev => prev.slice(1));
+        setAnimatedMoves(prev => prev.slice(1));
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [opponentMoves]);
+  }, [animatedMoves]);
 
   useEffect(() => {
     if (userProfile && gameRoomId) {
@@ -388,6 +388,7 @@ export default function GamePage() {
 
   useEffect(() => {
     if (gameState.status === 'finished') {
+      setAnimatedMoves([]);
       broadcastPieceSelection(null, []);
       setOpponentSelectedPiece(null);
       setOpponentValidMoves([]);
@@ -399,22 +400,39 @@ export default function GamePage() {
   }, []);
 
   const handleNewMove = useCallback(async (move: any) => {
-    if (!userProfile || move.user_id === userProfile.id) return;
+    if (!userProfile || !gameRoom) return;
 
     const from = PositionConverter.fromDb(move.from_position);
     const to = PositionConverter.fromDb(move.to_position);
 
-    setOpponentMoves(prev => [...prev, { from, to, timestamp: Date.now() }]);
+    const piece = gameState.board[from.row]?.[from.col];
+    if (!piece) return;
 
-    const fromNotation = PositionConverter.toNotation(from.row, from.col);
-    const toNotation = PositionConverter.toNotation(to.row, to.col);
-    showToast(getTranslation('opponentMove', { from: fromNotation, to: toNotation }), 'info');
+    const animatedMove: AnimatedMove = {
+      from,
+      to,
+      piece,
+      timestamp: Date.now(),
+      player: move.user_id
+    };
+
+    setAnimatedMoves(prev => [...prev, animatedMove]);
+
+    if (move.user_id !== userProfile.id) {
+      const fromNotation = PositionConverter.toNotation(from.row, from.col);
+      const toNotation = PositionConverter.toNotation(to.row, to.col);
+      showToast(getTranslation('opponentMove', { from: fromNotation, to: toNotation }), 'info');
+    }
 
     setOpponentSelectedPiece(null);
     setOpponentValidMoves([]);
 
+    setTimeout(() => {
+      setAnimatedMoves(prev => prev.filter(m => m.timestamp !== animatedMove.timestamp));
+    }, 1000);
+
     await fetchGameRoom();
-  }, [userProfile, showToast]);
+  }, [userProfile, gameRoom, gameState.board, showToast]);
 
   const broadcastPieceSelection = useCallback(async (position: Position | null, validMoves: Position[]) => {
     if (!userProfile || !gameRoomId || !playerNumber) return;
@@ -522,7 +540,6 @@ export default function GamePage() {
         type = isWinner ? 'win' : 'lose';
         break;
       case 'draw':
-        // This should rarely happen now
         title = getTranslation('draw');
         message = 'Match nul - les mises sont retournées';
         type = 'draw';
@@ -609,7 +626,6 @@ export default function GamePage() {
     if (!gameRoom || !userProfile) return;
 
     try {
-      // Calculate final game analysis if not already available
       let finalAnalysis = gameAnalysis;
       if (!finalAnalysis) {
         try {
@@ -628,7 +644,7 @@ export default function GamePage() {
         final_board_state: ProfessionalCheckersGame.serializeGameState(gameState),
         total_turns: gameState.turnNumber,
         total_moves: gameState.moveHistory.length,
-        game_analysis: finalAnalysis, // Now always has analysis or null
+        game_analysis: finalAnalysis,
         bet_amount: gameRoom.bet_amount,
         prize_distributed: totalBetAmount,
         game_duration: Math.floor((Date.now() - new Date(gameRoom.created_at).getTime()) / 1000),
@@ -639,7 +655,6 @@ export default function GamePage() {
       await updatePlayerRatings(winnerId, participants);
     } catch (err) {
       console.error('Error saving game result:', err);
-      // Silent fail but log the error
     }
   };
 
@@ -882,7 +897,7 @@ export default function GamePage() {
       selectedPiece: prev?.selectedPiece || null,
       validMoves: prev?.validMoves || [],
       mustContinueJumpFrom: newGameState.mustContinueJumpFrom,
-      continuingJumpPosition: newGameState.mustContinueJumpFrom, // Sync alias
+      continuingJumpPosition: newGameState.mustContinueJumpFrom,
     }));
 
     setTimeLeft(30);
@@ -951,7 +966,6 @@ export default function GamePage() {
     }
   };
 
-  // FIXED: Proper piece selection with continuing jump validation
   const handleCellClick = async (row: number, col: number) => {
     if (!userProfile || !gameRoom || gameRoom.status !== 'playing') {
       showToast(`La partie est ${gameRoom?.status || 'waiting'}`);
@@ -973,7 +987,6 @@ export default function GamePage() {
       return;
     }
 
-    // If we have a selected piece and are trying to move it
     if (gameState.selectedPiece) {
       const move = gameState.validMoves.find((m: Move) => 
         m.from.row === gameState.selectedPiece!.row &&
@@ -996,7 +1009,6 @@ export default function GamePage() {
       }
     }
 
-    // FIXED: Check if there's a continuing jump position (supports both property names)
     const continuingJump = gameState.mustContinueJumpFrom || gameState.continuingJumpPosition;
     if (continuingJump) {
       if (row !== continuingJump.row || col !== continuingJump.col) {
@@ -1044,7 +1056,6 @@ export default function GamePage() {
     }
   };
 
-  // FIXED: Complete move validation and error recovery with multi-jump support
   const makeMove = async (move: Move) => {
     if (!userProfile || !gameRoom || isProcessingMove) return;
 
@@ -1057,12 +1068,10 @@ export default function GamePage() {
         throw new Error('No piece at starting position');
       }
 
-      // Check sufficient balance
       if (gameRoom.bet_amount > 0 && userProfile.balance < gameRoom.bet_amount) {
         throw new Error('Solde insuffisant');
       }
 
-      // Proper move validation
       const isValidMove = gameState.validMoves.some(
         (validMove: Move) => 
           validMove.from.row === move.from.row && 
@@ -1076,7 +1085,6 @@ export default function GamePage() {
         throw new Error('Move is not valid');
       }
 
-      // Validate captured pieces exist
       if (move.captures && move.captures.length > 0) {
         for (const capturePos of move.captures) {
           const capturedPiece = gameState.board[capturePos.row][capturePos.col];
@@ -1086,7 +1094,6 @@ export default function GamePage() {
         }
       }
 
-      // Calculate new game state locally first
       const newGameState: ExtendedGameState = {
         ...ProfessionalCheckersGame.makeMove(gameState, move),
         selectedPiece: null,
@@ -1094,19 +1101,23 @@ export default function GamePage() {
       };
       tempBoardState = newGameState;
 
-      // Show king promotion animation
       if (move.promotedToKing) {
         showToast(getTranslation('promotedToKing'), 'success');
       }
 
-      // Animate after validation
-      setAnimatingPiece({
-        piece,
+      const animatedMove: AnimatedMove = {
         from: move.from,
         to: move.to,
-      });
+        piece,
+        timestamp: Date.now(),
+        player: userProfile.id
+      };
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      setAnimatedMoves(prev => [...prev, animatedMove]);
+
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      setAnimatedMoves(prev => prev.filter(m => m.timestamp !== animatedMove.timestamp));
 
       const gameStateCheck = checkCurrentGameState(newGameState);
       
@@ -1120,7 +1131,6 @@ export default function GamePage() {
         };
       }
 
-      // Proper turn number calculation with multi-jump support
       const { data: latestMoves } = await supabase
         .from('game_moves')
         .select('turn_number, move_number')
@@ -1134,19 +1144,15 @@ export default function GamePage() {
       if (latestMoves && latestMoves.length > 0) {
         const lastMove = latestMoves[0];
         
-        // FIXED: Check both property names for continuing jump
         const isContinuingJump = finalGameState.mustContinueJumpFrom || finalGameState.continuingJumpPosition;
         
         if (isContinuingJump) {
-          // Continuing jump - same turn number
           turnNumber = lastMove.turn_number;
           moveNumber = lastMove.move_number + 1;
         } else if (newGameState.currentPlayer === gameState.currentPlayer) {
-          // Multi-jump completed in same turn
           turnNumber = lastMove.turn_number;
           moveNumber = lastMove.move_number + 1;
         } else {
-          // Turn changed
           turnNumber = lastMove.turn_number + 1;
           moveNumber = 1;
         }
@@ -1168,7 +1174,6 @@ export default function GamePage() {
         }
       }
 
-      // Retry mechanism for network failures
       let retryCount = 0;
       let roomUpdateSuccess = false;
       
@@ -1212,9 +1217,8 @@ export default function GamePage() {
         selectedPiece: null,
         validMoves: [],
         mustContinueJumpFrom: finalGameState.mustContinueJumpFrom,
-        continuingJumpPosition: finalGameState.mustContinueJumpFrom, // Sync alias
+        continuingJumpPosition: finalGameState.mustContinueJumpFrom,
       });
-      setAnimatingPiece(null);
       setTimeLeft(30);
 
       showToast(getTranslation('moveRecorded'), 'success');
@@ -1223,15 +1227,12 @@ export default function GamePage() {
         if (finalGameState.winner) {
           await handleGameFinish(finalGameState.winner, gameStateCheck.reason as any);
         } else {
-          // This should not happen anymore since we always determine a winner
           showGameResultMessage('draw');
         }
       }
     } catch (err) {
-      // Proper error state cleanup
-      setAnimatingPiece(null);
+      setAnimatedMoves([]);
       
-      // Rollback to previous state on error
       if (tempBoardState === null) {
         setGameState(prev => ({
           ...prev,
@@ -1257,7 +1258,6 @@ export default function GamePage() {
   const checkCurrentGameState = (state: ExtendedGameState): { shouldEnd: boolean; winner: number | null; reason: string } => {
     const validMoves = ProfessionalCheckersGame.findAllValidMoves(state);
     
-    // Check if current player has no valid moves - opponent wins
     if (validMoves.length === 0) {
       return {
         shouldEnd: true,
@@ -1266,7 +1266,6 @@ export default function GamePage() {
       };
     }
     
-    // Check for draw conditions (max moves, repetition, etc.)
     const shouldEnd = ProfessionalCheckersGame.checkGameEndConditions(
       state.board,
       state.currentPlayer,
@@ -1276,12 +1275,11 @@ export default function GamePage() {
     );
     
     if (shouldEnd) {
-      // FIXED: No true draws - determine winner by position
       const winner = ProfessionalCheckersGame.determineWinnerByPosition(state.board);
       return {
         shouldEnd: true,
         winner: winner,
-        reason: 'material' // Game reached max moves, winner determined by position
+        reason: 'material'
       };
     }
     
@@ -1345,9 +1343,7 @@ export default function GamePage() {
     if (!gameRoom || !userProfile) return;
 
     try {
-      // FIXED: Handle draw case - return money to both players
       if (winnerPlayerNumber === null) {
-        // Return bet amount to each player
         const betAmount = gameRoom.bet_amount;
         
         for (const participant of participants) {
@@ -1384,7 +1380,6 @@ export default function GamePage() {
         return;
       }
 
-      // Normal case: winner takes all
       const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
       if (!winnerParticipant) return;
 
@@ -1900,13 +1895,13 @@ export default function GamePage() {
 
             <GameBoard
               gameState={gameState}
-              animatingPiece={animatingPiece}
-              opponentMoves={opponentMoves}
+              animatedMoves={animatedMoves}
               isMyTurn={isMyTurn}
               gameRoom={gameRoom}
               onCellClick={handleCellClick}
               opponentSelectedPiece={opponentSelectedPiece}
               opponentValidMoves={opponentValidMoves}
+              currentPlayer={userProfile?.id}
             />
 
             {gameAnalysis && gameRoom.status === 'playing' && (
