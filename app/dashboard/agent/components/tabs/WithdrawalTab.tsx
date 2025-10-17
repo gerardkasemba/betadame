@@ -1,6 +1,7 @@
-"use client"
-import { useState, useEffect } from 'react'
-import { QrCode, CheckCircle, XCircle, Upload, FileText, User, Phone, CreditCard, DollarSign, Info } from 'lucide-react'
+'use client'
+
+import { useState, useEffect, useRef } from 'react'
+import { Clock, QrCode, CheckCircle, XCircle, Upload, FileText, User, Phone, CreditCard, DollarSign, Info, AlertCircle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 interface WithdrawalRequest {
@@ -11,6 +12,7 @@ interface WithdrawalRequest {
   status: 'pending' | 'completed' | 'failed'
   qr_code_data: string
   created_at: string
+  time_remaining: number // ✅ ADD THIS
   user?: {
     username: string
     phone_number: string
@@ -62,224 +64,179 @@ export function WithdrawalTab({
   const [showDeclineModal, setShowDeclineModal] = useState(false)
 
   const supabase = createClient()
+  const countdownInterval = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     fetchPendingWithdrawals()
     setupRealtimeSubscription()
   }, [])
 
-  const setupRealtimeSubscription = () => {
-    const channel = supabase.channel('withdrawal-transactions')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'transactions',
-          filter: 'type=eq.withdrawal'
-        },
-        (payload) => {
-          console.log('Withdrawal transaction changed:', payload)
-          fetchPendingWithdrawals()
-        }
-      )
-      .subscribe()
+  // ✅ NEW: Countdown timer for withdrawals (1 minute)
+  useEffect(() => {
+    if (countdownInterval.current) {
+      clearInterval(countdownInterval.current)
+      countdownInterval.current = null
+    }
+
+    if (pendingWithdrawals.length > 0) {
+      countdownInterval.current = setInterval(() => {
+        updateWithdrawalCountdowns()
+      }, 1000)
+    }
 
     return () => {
-      channel.unsubscribe()
-    }
-  }
-
-const fetchPendingWithdrawals = async () => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    // Get agent with proper selection
-    const { data: agent, error: agentError } = await supabase
-      .from('agents')
-      .select('id')
-      .eq('user_id', user.id)
-      .single()
-
-    if (agentError || !agent) {
-      console.error('Agent not found:', agentError)
-      return
-    }
-
-    console.log('Agent ID:', agent.id)
-
-    // METHOD 1: Try without explicit join first (let Supabase infer the relationship)
-    const { data: transactions, error } = await supabase
-      .from('transactions')
-      .select(`
-        *,
-        profiles (*)
-      `)
-      .eq('type', 'withdrawal')
-      .eq('status', 'pending')
-      .eq('agent_id', agent.id)
-      .order('created_at', { ascending: true })
-
-    if (error) {
-      console.error('Error with inferred join:', error)
-      
-      // METHOD 2: Try manual join if automatic join fails
-      return await fetchWithManualJoin(agent.id)
-    }
-
-    console.log('Fetched transactions with inferred join:', transactions)
-
-    if (!transactions || transactions.length === 0) {
-      setPendingWithdrawals([])
-      return
-    }
-
-    // Process the transactions
-    const withdrawals: WithdrawalRequest[] = transactions.map(tx => {
-      const withdrawalData = parseWithdrawalData(tx.qr_code_data)
-      
-      const userProfile = tx.profiles ? {
-        username: tx.profiles.username,
-        phone_number: tx.profiles.phone_number,
-        email: tx.profiles.email
-      } : undefined
-
-      return {
-        id: tx.id,
-        user_id: tx.user_id,
-        amount: tx.amount,
-        reference: tx.reference,
-        status: tx.status,
-        qr_code_data: tx.qr_code_data,
-        created_at: tx.created_at,
-        user: userProfile,
-        payment_method: withdrawalData.payment_method,
-        account_name: withdrawalData.account_name,
-        phone_number: withdrawalData.phone_number
-      }
-    })
-
-    setPendingWithdrawals(withdrawals)
-
-  } catch (error) {
-    console.error('Error fetching withdrawals:', error)
-    setMessage({ type: 'error', text: 'Erreur lors du chargement des retraits' })
-  }
-}
-
-// Manual join method as fallback
-const fetchWithManualJoin = async (agentId: string) => {
-  try {
-    // First get transactions
-    const { data: transactions, error: txError } = await supabase
-      .from('transactions')
-      .select('*')
-      .eq('type', 'withdrawal')
-      .eq('status', 'pending')
-      .eq('agent_id', agentId)
-      .order('created_at', { ascending: true })
-
-    if (txError) throw txError
-
-    if (!transactions || transactions.length === 0) {
-      setPendingWithdrawals([])
-      return
-    }
-
-    // Get user IDs from transactions
-    const userIds = transactions.map(tx => tx.user_id).filter(Boolean) as string[]
-
-    let profiles: any[] = []
-    if (userIds.length > 0) {
-      // Fetch user profiles separately
-      const { data: profilesData, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, username, phone_number, email')
-        .in('id', userIds)
-
-      if (!profileError && profilesData) {
-        profiles = profilesData
+      if (countdownInterval.current) {
+        clearInterval(countdownInterval.current)
+        countdownInterval.current = null
       }
     }
+  }, [pendingWithdrawals])
 
-    // Combine transactions with user data
-    const withdrawals: WithdrawalRequest[] = transactions.map(tx => {
-      const userProfile = profiles.find(profile => profile.id === tx.user_id)
-      const withdrawalData = parseWithdrawalData(tx.qr_code_data)
-      
-      return {
-        id: tx.id,
-        user_id: tx.user_id,
-        amount: tx.amount,
-        reference: tx.reference,
-        status: tx.status,
-        qr_code_data: tx.qr_code_data,
-        created_at: tx.created_at,
-        user: userProfile ? {
-          username: userProfile.username,
-          phone_number: userProfile.phone_number,
-          email: userProfile.email
-        } : undefined,
-        payment_method: withdrawalData.payment_method,
-        account_name: withdrawalData.account_name,
-        phone_number: withdrawalData.phone_number
-      }
-    })
-
-    setPendingWithdrawals(withdrawals)
-
-  } catch (error) {
-    console.error('Error in manual join:', error)
-    throw error
+  // ✅ NEW: Update countdown timers
+  const updateWithdrawalCountdowns = () => {
+    setPendingWithdrawals(prev => 
+      prev.map(withdrawal => {
+        const created = new Date(withdrawal.created_at)
+        const expires = new Date(created.getTime() + 2 * 60 * 1000)
+        const timeRemaining = Math.max(0, Math.floor((expires.getTime() - Date.now()) / 1000))
+        
+        return { ...withdrawal, time_remaining: timeRemaining }
+      }).filter(withdrawal => withdrawal.time_remaining > 0)
+    )
   }
-}
 
-  const fetchPendingWithdrawalsFallback  = async (agentId: string) => {
+  // ✅ NEW: Format countdown time
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+
+  // ✅ NEW: Get time color based on urgency
+  const getTimeColor = (seconds: number) => {
+    if (seconds < 20) return 'text-red-600'
+    if (seconds < 40) return 'text-orange-600'
+    return 'text-green-600'
+  }
+
+  const setupRealtimeSubscription = async () => {
     try {
-      // Fallback method - get transactions assigned to this agent
+      // Get current agent first
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data: agent, error: agentError } = await supabase
+        .from('agents')
+        .select('id')
+        .eq('user_id', user.id)
+        .single()
+
+      if (agentError || !agent) {
+        console.error('Agent not found for realtime subscription:', agentError)
+        return
+      }
+
+      const channel = supabase.channel('withdrawal-transactions')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'transactions',
+            filter: 'type=eq.withdrawal'
+          },
+          (payload) => {
+            console.log('Withdrawal transaction changed:', payload)
+            
+            // ✅ Detect reassignment
+            if (payload.eventType === 'UPDATE' && payload.new.metadata?.reassigned_from) {
+              const wasMyTransaction = payload.old.agent_id === agent.id
+              const isNowMyTransaction = payload.new.agent_id === agent.id
+              
+              if (wasMyTransaction && !isNowMyTransaction) {
+                // Transaction was taken away from me
+                setMessage({
+                  type: 'error',
+                  text: `⚠️ Retrait ${payload.new.reference} réassigné pour timeout. Une pénalité a été ajoutée à votre compte.`
+                })
+              } else if (!wasMyTransaction && isNowMyTransaction) {
+                // Transaction was assigned to me
+                setMessage({
+                  type: 'success',
+                  text: `✅ Nouveau retrait ${payload.new.reference} vous a été assigné suite à un timeout d'un autre agent.`
+                })
+              }
+            }
+            
+            fetchPendingWithdrawals()
+          }
+        )
+        .subscribe()
+
+      return () => {
+        channel.unsubscribe()
+      }
+    } catch (error) {
+      console.error('Error setting up realtime subscription:', error)
+    }
+  }
+
+  const fetchPendingWithdrawals = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data: agent, error: agentError } = await supabase
+        .from('agents')
+        .select('id')
+        .eq('user_id', user.id)
+        .single()
+
+      if (agentError || !agent) {
+        console.error('Agent not found:', agentError)
+        return
+      }
+
+      // ✅ UPDATED: Filter withdrawals created in the last 1 minute
+      const oneMinuteAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+
       const { data: transactions, error } = await supabase
         .from('transactions')
-        .select('*')
+        .select(`
+          *,
+          profiles (*)
+        `)
         .eq('type', 'withdrawal')
         .eq('status', 'pending')
-        .eq('agent_id', agentId) // Only this agent's assigned withdrawals
+        .eq('agent_id', agent.id)
+        .gte('created_at', oneMinuteAgo) // ✅ Only last 1 minute
         .order('created_at', { ascending: true })
 
       if (error) {
-        console.error('Error fetching transactions in fallback:', error)
-        throw error
+        console.error('Error fetching withdrawals:', error)
+        return
       }
-
-      console.log('Fallback transactions:', transactions)
 
       if (!transactions || transactions.length === 0) {
         setPendingWithdrawals([])
         return
       }
 
-      // Get user IDs from transactions
-      const userIds = transactions.map(tx => tx.user_id).filter(Boolean)
-
-      let profiles: any[] = []
-      if (userIds.length > 0) {
-        // Fetch user profiles separately
-        const { data: profilesData, error: profileError } = await supabase
-          .from('profiles')
-          .select('id, username, phone_number, email')
-          .in('id', userIds)
-
-        if (!profileError) {
-          profiles = profilesData || []
-        }
-        console.log('Fetched profiles separately:', profiles)
-      }
-
-      // Combine transactions with user data
+      // ✅ ADD: Calculate time remaining for each withdrawal
       const withdrawals: WithdrawalRequest[] = transactions.map(tx => {
-        const userProfile = profiles.find(profile => profile.id === tx.user_id)
         const withdrawalData = parseWithdrawalData(tx.qr_code_data)
         
+        const userProfile = tx.profiles ? {
+          username: tx.profiles.username,
+          phone_number: tx.profiles.phone_number,
+          email: tx.profiles.email
+        } : undefined
+
+        // Calculate time remaining (1 minute from creation)
+        const created = new Date(tx.created_at)
+        const expires = new Date(created.getTime() + 60 * 1000) // 1 minute
+        const timeRemaining = Math.max(0, Math.floor((expires.getTime() - Date.now()) / 1000))
+
         return {
           id: tx.id,
           user_id: tx.user_id,
@@ -288,11 +245,8 @@ const fetchWithManualJoin = async (agentId: string) => {
           status: tx.status,
           qr_code_data: tx.qr_code_data,
           created_at: tx.created_at,
-          user: userProfile ? {
-            username: userProfile.username,
-            phone_number: userProfile.phone_number,
-            email: userProfile.email
-          } : undefined,
+          time_remaining: timeRemaining, // ✅ NEW FIELD
+          user: userProfile,
           payment_method: withdrawalData.payment_method,
           account_name: withdrawalData.account_name,
           phone_number: withdrawalData.phone_number
@@ -302,7 +256,8 @@ const fetchWithManualJoin = async (agentId: string) => {
       setPendingWithdrawals(withdrawals)
 
     } catch (error) {
-      console.error('Error in fallback withdrawal fetch:', error)
+      console.error('Error fetching withdrawals:', error)
+      setMessage({ type: 'error', text: 'Erreur lors du chargement des retraits' })
     }
   }
 
@@ -364,11 +319,9 @@ const handleApproveWithdrawal = async (requestId: string) => {
   setMessage(null)
 
   try {
-    // Find the request details
     const request = pendingWithdrawals.find(w => w.id === requestId)
     if (!request) throw new Error('Demande de retrait non trouvée')
 
-    // Validate user_id exists
     if (!request.user_id) {
       throw new Error('ID utilisateur manquant dans la transaction')
     }
@@ -388,21 +341,30 @@ const handleApproveWithdrawal = async (requestId: string) => {
       throw new Error(`Erreur de téléchargement: ${uploadError.message}`)
     }
 
-    // Get public URL for proof_image_url
     const { data: { publicUrl } } = supabase.storage
       .from('transaction-proofs')
       .getPublicUrl(fileName)
 
-    // FIXED: Calculate fees with proper distribution
-    const withdrawalCommission = request.amount * 0.025  // 2.5% agent commission
-    const agentTransactionFee = request.amount * 0.015   // 1.5% agent transaction fee
-    const platformFee = request.amount * 0.02           // 2% platform fee
-    const maintenanceFee = request.amount * 0.02        // 2% maintenance fee
-    const totalFees = withdrawalCommission + agentTransactionFee + platformFee + maintenanceFee // 8% total
-    const netAmountToUser = request.amount - totalFees
+    // Fee calculation
+    const withdrawalAmount = request.amount
+    const agentCommission = withdrawalAmount * 0.025  // 2.5% agent commission
+    const agentTransactionFee = withdrawalAmount * 0.015 // 1.5% agent transaction fee
+    const platformFee = withdrawalAmount * 0.02       // 2% platform fee
+    const maintenanceFee = withdrawalAmount * 0.02    // 2% maintenance fee
+    const totalFees = agentCommission + agentTransactionFee + platformFee + maintenanceFee // 8% total
+    const netAmountToUser = withdrawalAmount - totalFees
+    const totalAgentCommission = agentCommission + agentTransactionFee // 4% total
 
-    // Total commission for agent (2.5% + 1.5% = 4%)
-    const totalAgentCommission = withdrawalCommission + agentTransactionFee
+    console.log('Fee breakdown:', {
+      withdrawalAmount,
+      agentCommission,
+      agentTransactionFee,
+      platformFee,
+      maintenanceFee,
+      totalFees,
+      netAmountToUser,
+      totalAgentCommission
+    })
 
     // Get current agent
     const { data: { user } } = await supabase.auth.getUser()
@@ -416,7 +378,15 @@ const handleApproveWithdrawal = async (requestId: string) => {
 
     if (agentError || !agent) throw new Error('Agent non trouvé')
 
-    // Get transaction details
+    // Check agent's available balance
+    if (agent.available_balance < withdrawalAmount) {
+      throw new Error(
+        `Solde disponible insuffisant. ` +
+        `Vous avez ${agent.available_balance}$, ` +
+        `nécessaire: ${withdrawalAmount}$ (montant total du retrait)`
+      )
+    }
+
     const { data: transaction, error: transactionError } = await supabase
       .from('transactions')
       .select('*')
@@ -427,7 +397,6 @@ const handleApproveWithdrawal = async (requestId: string) => {
       throw new Error('Transaction non trouvée')
     }
 
-    // Validate transaction has user_id
     if (!transaction.user_id) {
       throw new Error('Transaction invalide: user_id manquant')
     }
@@ -436,7 +405,7 @@ const handleApproveWithdrawal = async (requestId: string) => {
     let paymentMethodName = 'Méthode de paiement'
     let paymentMethodId = transaction.payment_method_id
 
-    // If payment method is specified in transaction, use it
+    // Find appropriate payment account
     if (transaction.payment_method_id) {
       const { data: account, error: paymentAccountError } = await supabase
         .from('agent_payment_accounts')
@@ -462,16 +431,15 @@ const handleApproveWithdrawal = async (requestId: string) => {
       paymentMethodName = account.payment_methods[0]?.name || 'Méthode inconnue'
       paymentMethodId = account.payment_methods[0]?.id || transaction.payment_method_id
 
-      // Check balance in specific payment account
+      // Check payment account balance
       if (paymentAccount.current_balance < netAmountToUser) {
         throw new Error(
           `Solde insuffisant dans ${paymentMethodName}. ` +
           `Vous avez ${paymentAccount.current_balance}$, ` +
-          `nécessaire: ${netAmountToUser}$`
+          `nécessaire: ${netAmountToUser}$ (montant net versé au client)`
         )
       }
     } else {
-      // If no specific payment method, use the agent's primary payment account
       const { data: primaryAccount, error: primaryAccountError } = await supabase
         .from('agent_payment_accounts')
         .select(`
@@ -496,18 +464,18 @@ const handleApproveWithdrawal = async (requestId: string) => {
       paymentMethodName = primaryAccount.payment_methods[0]?.name || 'Méthode inconnue'
       paymentMethodId = primaryAccount.payment_methods[0]?.id
 
-      // Check balance in primary payment account
       if (paymentAccount.current_balance < netAmountToUser) {
         throw new Error(
           `Solde insuffisant dans votre compte principal (${paymentMethodName}). ` +
           `Vous avez ${paymentAccount.current_balance}$, ` +
-          `nécessaire: ${netAmountToUser}$`
+          `nécessaire: ${netAmountToUser}$ (montant net versé au client)`
         )
       }
     }
 
-    // FIXED: Update transaction with all required fields
     const now = new Date().toISOString()
+
+    // Update transaction
     const { error: updateError } = await supabase
       .from('transactions')
       .update({
@@ -527,9 +495,7 @@ const handleApproveWithdrawal = async (requestId: string) => {
       throw new Error(`Erreur lors de la mise à jour de la transaction: ${updateError.message}`)
     }
 
-    console.log('Transaction updated successfully')
-
-    // FIXED: Update payment account balance - ONLY deduct from the specific payment account
+    // Deduct from payment account
     const { error: paymentAccountUpdateError } = await supabase
       .from('agent_payment_accounts')
       .update({
@@ -543,13 +509,12 @@ const handleApproveWithdrawal = async (requestId: string) => {
       throw new Error(`Erreur mise à jour compte paiement: ${paymentAccountUpdateError.message}`)
     }
 
-    // FIXED: Update agent balances - ONLY add commission, don't deduct from available_balance
+    // Update agent balances
     const { error: agentBalanceError } = await supabase
       .from('agents')
       .update({
-        // DON'T deduct from available_balance - that's for agent's own withdrawals
-        available_balance: agent.available_balance, // Keep available_balance unchanged
-        platform_balance: (agent.platform_balance || 0) + totalAgentCommission, // Add commission to platform_balance
+        available_balance: agent.available_balance - withdrawalAmount,
+        platform_balance: (agent.platform_balance || 0) + totalAgentCommission,
         updated_at: now
       })
       .eq('id', agent.id)
@@ -559,72 +524,78 @@ const handleApproveWithdrawal = async (requestId: string) => {
       throw new Error(`Erreur mise à jour solde agent: ${agentBalanceError.message}`)
     }
 
-    // FIXED: Record agent commission with proper breakdown
+    console.log('Balance updates completed:', {
+      paymentAccountDeduction: netAmountToUser,
+      agentAvailableDeduction: withdrawalAmount,
+      agentCommissionAdded: totalAgentCommission,
+      netEffect: (withdrawalAmount - totalAgentCommission)
+    })
+
+    // ✅ PROPER COMMISSION RECORDING WITH CORRECT TYPES
     try {
-      // Record the 2.5% commission
+      // Record the 2.5% commission - using 'withdrawal' type as per schema
       const { error: commissionError } = await supabase
         .from('agent_commissions')
         .insert({
           agent_id: agent.id,
           transaction_id: requestId,
-          amount: withdrawalCommission, // 2.5% commission
-          type: 'withdrawal_commission',
+          amount: agentCommission,
+          type: 'withdrawal', // ✅ Correct type from schema
           status: 'paid',
           paid_at: now,
           created_at: now
         })
 
       if (commissionError) {
-        console.warn('Error recording commission:', commissionError)
+        console.error('Error recording commission:', commissionError)
+        throw new Error(`Erreur enregistrement commission: ${commissionError.message}`)
       }
 
-      // Record the 1.5% transaction fee
+      // Record the 1.5% transaction fee - using 'withdrawal' type
       const { error: transactionFeeError } = await supabase
         .from('agent_commissions')
         .insert({
           agent_id: agent.id,
           transaction_id: requestId,
-          amount: agentTransactionFee, // 1.5% transaction fee
-          type: 'withdrawal_transaction_fee',
+          amount: agentTransactionFee,
+          type: 'withdrawal', // ✅ Correct type from schema
           status: 'paid',
           paid_at: now,
           created_at: now
         })
 
       if (transactionFeeError) {
-        console.warn('Error recording transaction fee:', transactionFeeError)
+        console.error('Error recording transaction fee:', transactionFeeError)
+        throw new Error(`Erreur enregistrement frais transaction: ${transactionFeeError.message}`)
       }
 
       console.log('Agent commissions recorded successfully:', {
-        commission: withdrawalCommission,
+        commission: agentCommission,
         transactionFee: agentTransactionFee,
         total: totalAgentCommission
       })
     } catch (commissionError) {
-      console.warn('Commission recording failed:', commissionError)
+      console.error('Commission recording failed:', commissionError)
+      throw commissionError // Re-throw to be caught by main error handler
     }
 
-    // FIXED: Record admin profit with proper breakdown
+    // Record admin profit
     try {
       const { error: profitError } = await supabase
         .from('admin_profit')
         .insert({
           transaction_id: requestId,
           agent_id: agent.id,
-          platform_fee: platformFee, // 2% platform fee
-          maintenance_fee: maintenanceFee, // 2% maintenance fee
-          total_amount: platformFee + maintenanceFee, // 4% total to admin
+          platform_fee: platformFee,
+          maintenance_fee: maintenanceFee,
+          total_amount: platformFee + maintenanceFee,
           created_at: now
         })
 
       if (profitError) {
         console.warn('Error recording admin profit:', profitError)
       } else {
-        console.log('Admin profit recorded successfully:', {
-          platform_fee: platformFee,
-          maintenance_fee: maintenanceFee,
-          total: platformFee + maintenanceFee
-        })
+        console.log('Admin profit recorded successfully')
       }
     } catch (profitError) {
       console.warn('Admin profit recording failed:', profitError)
@@ -642,12 +613,14 @@ const handleApproveWithdrawal = async (requestId: string) => {
           created_at: now
         })
 
-      if (paymentRecordError) console.warn('Error recording payment details:', paymentRecordError)
+      if (paymentRecordError) {
+        console.warn('Error recording payment details:', paymentRecordError)
+      }
     } catch (paymentRecordError) {
       console.warn('Payment details recording failed:', paymentRecordError)
     }
 
-    // FIXED: Update user balance - deduct the full withdrawal amount
+    // Update user balance
     try {
       const { data: userProfile } = await supabase
         .from('profiles')
@@ -659,7 +632,7 @@ const handleApproveWithdrawal = async (requestId: string) => {
         const { error: userBalanceError } = await supabase
           .from('profiles')
           .update({
-            balance: (userProfile.balance || 0) - request.amount // Deduct full amount from user
+            balance: (userProfile.balance || 0) - withdrawalAmount
           })
           .eq('id', transaction.user_id)
 
@@ -675,7 +648,7 @@ const handleApproveWithdrawal = async (requestId: string) => {
 
     setMessage({ 
       type: 'success', 
-      text: `Retrait de ${request.amount}$ approuvé! 
+      text: `Retrait de ${withdrawalAmount}$ approuvé! 
             Méthode: ${paymentMethodName}
             Versé à l'utilisateur: ${netAmountToUser.toFixed(2)}$ 
             Frais totaux: ${totalFees.toFixed(2)}$ (8%)
@@ -776,17 +749,6 @@ const handleApproveWithdrawal = async (requestId: string) => {
     }
   }
 
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString)
-    return date.toLocaleString('fr-FR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
-
   const getPaymentMethodDisplay = (request: WithdrawalRequest) => {
     if (request.payment_method) {
       return request.payment_method
@@ -808,6 +770,82 @@ const handleApproveWithdrawal = async (requestId: string) => {
     const withdrawalData = parseWithdrawalData(request.qr_code_data)
     return withdrawalData.phone_number || 'Non spécifié'
   }
+
+    // Manual join method as fallback
+    const fetchWithManualJoin = async (agentId: string) => {
+      try {
+        const oneMinuteAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+
+        // First get transactions
+        const { data: transactions, error: txError } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('type', 'withdrawal')
+          .eq('status', 'pending')
+          .eq('agent_id', agentId)
+          .gte('created_at', oneMinuteAgo) // ✅ Add time filter
+          .order('created_at', { ascending: true })
+
+        if (txError) throw txError
+
+        if (!transactions || transactions.length === 0) {
+          setPendingWithdrawals([])
+          return
+        }
+
+        // Get user IDs from transactions
+        const userIds = transactions.map(tx => tx.user_id).filter(Boolean) as string[]
+
+        let profiles: any[] = []
+        if (userIds.length > 0) {
+          // Fetch user profiles separately
+          const { data: profilesData, error: profileError } = await supabase
+            .from('profiles')
+            .select('id, username, phone_number, email')
+            .in('id', userIds)
+
+          if (!profileError && profilesData) {
+            profiles = profilesData
+          }
+        }
+
+        // Combine transactions with user data
+        const withdrawals: WithdrawalRequest[] = transactions.map(tx => {
+          const userProfile = profiles.find(profile => profile.id === tx.user_id)
+          const withdrawalData = parseWithdrawalData(tx.qr_code_data)
+          
+          // ✅ ADD: Calculate time remaining (1 minute from creation)
+          const created = new Date(tx.created_at)
+          const expires = new Date(created.getTime() + 60 * 1000) // 1 minute
+          const timeRemaining = Math.max(0, Math.floor((expires.getTime() - Date.now()) / 1000))
+          
+          return {
+            id: tx.id,
+            user_id: tx.user_id,
+            amount: tx.amount,
+            reference: tx.reference,
+            status: tx.status,
+            qr_code_data: tx.qr_code_data,
+            created_at: tx.created_at,
+            time_remaining: timeRemaining, // ✅ ADD THIS FIELD
+            user: userProfile ? {
+              username: userProfile.username,
+              phone_number: userProfile.phone_number,
+              email: userProfile.email
+            } : undefined,
+            payment_method: withdrawalData.payment_method,
+            account_name: withdrawalData.account_name,
+            phone_number: withdrawalData.phone_number
+          }
+        })
+
+        setPendingWithdrawals(withdrawals)
+
+      } catch (error) {
+        console.error('Error in manual join:', error)
+        throw error
+      }
+    }
 
   const getAccountNameDisplay = (request: WithdrawalRequest) => {
     console.log('Getting account name for request:', {
@@ -856,6 +894,11 @@ const handleApproveWithdrawal = async (requestId: string) => {
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
         <h1 className="text-xl font-bold text-gray-900 mb-2">Retraits</h1>
         <p className="text-sm text-gray-600">Gérez les demandes de retrait des clients</p>
+        {/* ✅ NEW: Timeout warning */}
+        <p className="text-xs text-orange-600 mt-2 font-medium flex items-center">
+          <Clock className="h-3 w-3 mr-1" />
+          ⚠️ Délai: 2 minute maximum par retrait
+        </p>
       </div>
 
       {/* Quick Actions Card */}
@@ -928,9 +971,18 @@ const handleApproveWithdrawal = async (requestId: string) => {
               const fees = calculateFees(request.amount)
               
               return (
-                <div key={request.id} className="p-4">
-                  {/* Header */}
-                  <div className="flex items-start justify-between mb-3">
+                <div 
+                  key={request.id} 
+                  className={`p-4 ${
+                    request.time_remaining < 20 
+                      ? 'bg-red-50 border-l-4 border-red-500' 
+                      : request.time_remaining < 40
+                      ? 'bg-orange-50 border-l-4 border-orange-500'
+                      : ''
+                  }`}
+                >
+                  {/* ✅ NEW: Countdown Timer Header */}
+                  <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center space-x-3">
                       <div className="bg-blue-50 p-2 rounded-lg">
                         <DollarSign className="h-4 w-4 text-blue-600" />
@@ -940,16 +992,41 @@ const handleApproveWithdrawal = async (requestId: string) => {
                           {request.amount.toFixed(2)}$
                         </p>
                         <p className="text-xs text-gray-500">
-                          {formatTime(request.created_at)}
+                          {new Date(request.created_at).toLocaleTimeString('fr-FR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
                         </p>
                       </div>
                     </div>
-                    <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
-                      En attente
-                    </span>
+                    
+                    {/* ✅ NEW: Countdown Display */}
+                    <div className="flex flex-col items-end">
+                      <div className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg border shadow-sm ${
+                        request.time_remaining < 20 ? 'bg-red-100 border-red-300 animate-pulse' :
+                        request.time_remaining < 40 ? 'bg-orange-100 border-orange-300' :
+                        'bg-white border-gray-300'
+                      }`}>
+                        <Clock className={`h-3 w-3 ${getTimeColor(request.time_remaining)}`} />
+                        <span className={`font-mono font-bold text-sm ${getTimeColor(request.time_remaining)}`}>
+                          {formatTime(request.time_remaining)}
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-500 mt-1">Temps restant</span>
+                    </div>
                   </div>
 
-                  {/* Client Info - FIXED: Using getAccountNameDisplay */}
+                  {/* ✅ NEW: Urgent Warning */}
+                  {request.time_remaining < 20 && (
+                    <div className="mb-3 p-2 bg-red-100 border border-red-300 rounded-lg animate-pulse">
+                      <p className="text-red-800 text-xs font-bold flex items-center">
+                        <AlertCircle className="h-4 w-4 mr-1.5 flex-shrink-0" />
+                        🚨 URGENT: Traiter dans {formatTime(request.time_remaining)} ou recevoir une pénalité!
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Client Info */}
                   <div className="space-y-2 mb-3">
                     <div className="flex items-center text-sm text-gray-600">
                       <User className="h-3 w-3 mr-2" />
@@ -1008,13 +1085,17 @@ const handleApproveWithdrawal = async (requestId: string) => {
         )}
       </div>
 
-      {/* Info Card */}
+      {/* ✅ UPDATED: Info Card with new timeout info */}
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
         <div className="flex items-start space-x-3">
           <Info className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
           <div className="space-y-2 text-sm text-blue-800">
             <p className="font-medium">Commission agent: 4%</p>
             <p className="text-xs">Frais totaux: 8% (4% pour vous + 2% plateforme + 2% maintenance)</p>
+            <p className="text-xs text-red-700 font-bold mt-2">
+              ⚠️ Délai maximum: 2 minute par retrait<br/>
+              Non-respect = Réassignation automatique + 1 pénalité
+            </p>
           </div>
         </div>
       </div>

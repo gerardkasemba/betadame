@@ -1,6 +1,7 @@
-import { Shield, RefreshCw, Wallet, Download, Info, ChevronRight } from 'lucide-react'
+import { Shield, RefreshCw, Wallet, Download, Info, ChevronRight, Wifi, WifiOff, Loader } from 'lucide-react'
 import { fr } from '@/lib/i18n'
 import { Agent, DashboardStats } from '../types'
+import  { useState } from "react"
 
 interface AgentHeaderProps {
   agent: Agent
@@ -8,9 +9,17 @@ interface AgentHeaderProps {
   refreshing: boolean
   onRefresh: () => void
   onWithdraw: () => void
+  onOnlineStatusChange: (newStatus: 'online' | 'offline') => Promise<void>
 }
 
-export function AgentHeader({ agent, stats, refreshing, onRefresh, onWithdraw }: AgentHeaderProps) {
+export function AgentHeader({ 
+  agent, 
+  stats, 
+  refreshing, 
+  onRefresh, 
+  onWithdraw,
+  onOnlineStatusChange 
+}: AgentHeaderProps) {
   const getVerificationStatus = (agent: any) => {
     if (agent.verification_status === 'approved') {
       return { text: 'Vérifié', color: 'text-green-600', bg: 'bg-green-100' }
@@ -50,6 +59,37 @@ export function AgentHeader({ agent, stats, refreshing, onRefresh, onWithdraw }:
             {verificationStatus.text}
           </div>
         </div>
+      </div>
+
+      {/* Online Status Toggle */}
+      <div className="flex items-center justify-between bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl p-4 border border-gray-200 mb-4">
+        <div className="flex items-center space-x-3">
+          <div className={`p-2 rounded-lg ${
+            agent.online_status === 'online' ? 'bg-green-100' : 'bg-gray-200'
+          }`}>
+            {agent.online_status === 'online' ? (
+              <Wifi className="h-5 w-5 text-green-600" />
+            ) : (
+              <WifiOff className="h-5 w-5 text-gray-600" />
+            )}
+          </div>
+          <div>
+            <div className="font-medium text-gray-900">
+              Statut: <span className="capitalize">{agent.online_status}</span>
+            </div>
+            <div className="text-sm text-gray-600">
+              {agent.online_status === 'online' 
+                ? 'Visible pour les clients' 
+                : 'Non visible pour les clients'
+              }
+            </div>
+          </div>
+        </div>
+        
+        <OnlineStatusToggle 
+          agent={agent}
+          onStatusChange={onOnlineStatusChange}
+        />
       </div>
 
       {/* Balance Cards - Stacked for mobile */}
@@ -146,6 +186,69 @@ export function AgentHeader({ agent, stats, refreshing, onRefresh, onWithdraw }:
           <div>• Retraits agents: 4%</div>
         </div>
       </details>
+    </div>
+  )
+}
+
+// Online Status Toggle Component
+interface OnlineStatusToggleProps {
+  agent: Agent
+  onStatusChange: (newStatus: 'online' | 'offline') => Promise<void>
+}
+
+function OnlineStatusToggle({ agent, onStatusChange }: OnlineStatusToggleProps) {
+  const [loading, setLoading] = useState(false)
+  const [currentStatus, setCurrentStatus] = useState(agent.online_status)
+
+  const canGoOnline = agent.is_active && agent.verification_status === 'approved'
+
+  const toggleOnlineStatus = async () => {
+    if (!canGoOnline) {
+      alert('Votre compte doit être actif et vérifié pour passer en ligne')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const newStatus = currentStatus === 'online' ? 'offline' : 'online'
+      await onStatusChange(newStatus)
+      setCurrentStatus(newStatus)
+    } catch (error) {
+      console.error('Error updating online status:', error)
+      alert('Erreur lors de la mise à jour du statut')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center space-x-3">
+      {!canGoOnline && currentStatus === 'offline' && (
+        <div className="text-xs text-gray-500 text-right max-w-[80px]">
+          {!agent.is_active ? 'Compte inactif' : 'Vérification en attente'}
+        </div>
+      )}
+      
+      <button
+        onClick={toggleOnlineStatus}
+        disabled={loading || !canGoOnline}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+          currentStatus === 'online' 
+            ? 'bg-green-500' 
+            : 'bg-gray-300'
+        } ${!canGoOnline ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+            currentStatus === 'online' ? 'translate-x-6' : 'translate-x-1'
+          }`}
+        />
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Loader className="h-3 w-3 animate-spin text-white" />
+          </div>
+        )}
+      </button>
     </div>
   )
 }

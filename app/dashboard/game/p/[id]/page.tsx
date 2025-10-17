@@ -1348,22 +1348,31 @@ export default function GamePage() {
     };
   };
 
-  const handleGameFinish = async (winnerPlayerNumber: number | null, reason: 'checkmate' | 'resignation' | 'timeout' | 'material' | 'draw') => {
+  const handleGameFinish = async (winnerPlayerNumber: number | null, reason: 'checkmate' | 'resignation' | 'timeout' | 'material') => {
     if (!gameRoom || !userProfile) return;
 
     try {
-      const winnerParticipant = winnerPlayerNumber ? participants.find(p => p.player_number === winnerPlayerNumber) : null;
+      // IMPROVED: Ensure we always have a winner
+      if (winnerPlayerNumber === null) {
+        console.warn('Winner is null, determining by position');
+        winnerPlayerNumber = ProfessionalCheckersGame.determineWinnerByPosition(gameState.board);
+      }
+
+      const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
       const winnerId = winnerParticipant?.user_id || null;
 
+      // Save game result
       await saveGameResult(winnerId);
 
+      // Distribute prize money
       if (gameRoom.bet_amount && gameRoom.bet_amount > 0) {
         await distributePrizeMoney(winnerPlayerNumber);
       }
 
-      showGameResultMessage(reason, winnerPlayerNumber || undefined);
+      // Show result message
+      showGameResultMessage(reason, winnerPlayerNumber);
     } catch (err) {
-      // Silent fail
+      console.error('Error finishing game:', err);
     }
   };
 
@@ -1401,57 +1410,33 @@ export default function GamePage() {
     if (!gameRoom || !userProfile) return;
 
     try {
-      // FIXED: Handle draw case - return money to both players
+      // REMOVED: Draw handling - should never happen now
       if (winnerPlayerNumber === null) {
-        // Return bet amount to each player
-        const betAmount = gameRoom.bet_amount;
-        
-        for (const participant of participants) {
-          try {
-            await supabase.rpc('update_user_balance', {
-              user_id: participant.user_id,
-              amount: betAmount,
-            });
-          } catch {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('balance')
-              .eq('id', participant.user_id)
-              .single();
+        console.error('Winner is null - this should not happen');
+        // Fallback: determine winner by position
+        winnerPlayerNumber = ProfessionalCheckersGame.determineWinnerByPosition(gameState.board);
+      }
 
-            if (profile) {
-              await supabase
-                .from('profiles')
-                .update({ balance: profile.balance + betAmount })
-                .eq('id', participant.user_id);
-            }
-          }
-
-          await supabase
-            .from('transactions')
-            .insert({
-              user_id: participant.user_id,
-              type: 'game_refund',
-              amount: betAmount,
-              status: 'completed',
-              reference: `GAME-DRAW-${gameRoom.id}`
-            });
-        }
+      const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
+      if (!winnerParticipant) {
+        console.error('Winner participant not found');
         return;
       }
 
-      // Normal case: winner takes all
-      const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
-      if (!winnerParticipant) return;
-
       const prizeAmount = totalBetAmount;
 
+      // Award prize to winner using RPC function
       try {
-        await supabase.rpc('update_user_balance', {
+        const { error: rpcError } = await supabase.rpc('update_user_balance', {
           user_id: winnerParticipant.user_id,
           amount: prizeAmount,
         });
-      } catch {
+
+        if (rpcError) {
+          throw rpcError;
+        }
+      } catch (rpcErr) {
+        // Fallback: direct update
         const { data: winnerProfile } = await supabase
           .from('profiles')
           .select('balance')
@@ -1466,6 +1451,7 @@ export default function GamePage() {
         }
       }
 
+      // Record transaction
       await supabase
         .from('transactions')
         .insert({
@@ -1473,10 +1459,13 @@ export default function GamePage() {
           type: 'game_win',
           amount: prizeAmount,
           status: 'completed',
-          reference: `GAME-WIN-${gameRoom.id}`
+          reference: `GAME-WIN-${gameRoom.id}`,
+          description: `Won checkers game - ${prizeAmount}$`
         });
+
+      console.log(`Prize of ${prizeAmount}$ awarded to player ${winnerPlayerNumber}`);
     } catch (err) {
-      // Silent fail
+      console.error('Error distributing prize money:', err);
     }
   };
 
@@ -1494,18 +1483,34 @@ export default function GamePage() {
         throw new Error('Winner participant not found');
       }
 
-      await supabase
+      // Update game room status
+      const { error: updateError } = await supabase
         .from('game_rooms')
         .update({
           status: 'finished',
           winner_id: winnerParticipant.user_id,
+          board_state: ProfessionalCheckersGame.serializeGameState({
+            ...gameState,
+            status: 'finished',
+            winner: winnerPlayerNumber
+          })
         })
         .eq('id', gameRoomId);
 
+      if (updateError) {
+        throw updateError;
+      }
+
+      // Distribute prize money to winner
       await handleGameFinish(winnerPlayerNumber, 'resignation');
+      
       showToast(getTranslation('resignSuccess'), 'success');
       setShowResignConfirm(false);
+      
+      // Refresh balance to show deduction
+      await refreshUserBalance();
     } catch (err) {
+      console.error('Error resigning game:', err);
       showToast('Erreur lors de l\'abandon');
       setShowResignConfirm(false);
     }

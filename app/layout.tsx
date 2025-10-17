@@ -1,23 +1,35 @@
 // app/layout.tsx
-import type { Metadata } from 'next'
+"use client"
 
 import './globals.css'
 import { AuthProvider } from './auth-provider'
 import Footer from '@/components/footer'
 import { ToastProvider } from '@/contexts/ToastContext'
 import { ToastContainer } from '@/components/ToastContainer'
+import { timeoutService } from '@/lib/background-services'
+import { useEffect } from 'react'
 
 
-export const metadata: Metadata = {
-  title: 'Betadame - Congolese Checkers',
-  description: 'Real-time Congolese checker board game for money',
-}
+// export const metadata: Metadata = {
+//   title: 'Betadame - Congolese Checkers',
+//   description: 'Real-time Congolese checker board game for money',
+// }
 
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+
+  useEffect(() => {
+    // Start the timeout service when app loads
+    timeoutService.start()
+
+    // Cleanup on unmount
+    return () => {
+      timeoutService.stop()
+    }
+  }, [])
   return (
     <html lang="en">
       <head>

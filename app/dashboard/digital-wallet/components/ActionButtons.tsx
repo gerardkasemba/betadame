@@ -19,7 +19,7 @@ export default function ActionButtons({
     <div className="grid grid-cols-3 gap-2 mb-6">
       {/* Deposit Button */}
       <Link
-        href="/dashboard/deposit"
+        href="/dashboard/digital-wallet/deposit"
         className="group flex items-center justify-center p-3 bg-white border border-gray-200 rounded-lg hover:border-green-400 hover:bg-green-50 transition-all duration-200 hover:shadow-sm"
       >
         <div className="flex flex-col items-center space-y-1">
@@ -32,7 +32,7 @@ export default function ActionButtons({
 
       {/* Withdraw Button */}
       <Link
-        href="/dashboard/withdraw"
+        href="/dashboard/digital-wallet/withdraw"
         className="group flex items-center justify-center p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-400 hover:bg-blue-50 transition-all duration-200 hover:shadow-sm"
       >
         <div className="flex flex-col items-center space-y-1">

@@ -54,7 +54,7 @@ interface DepositState {
   proofImage: File | null
   countdown: number
   currentStatus: 'pending' | 'completed' | 'failed'
-  showClaimOption?: boolean
+  showClaimOption?: boolean // ✅ Add this
 }
 
 export default function DepositPage() {
@@ -115,63 +115,6 @@ export default function DepositPage() {
     }
     return () => clearInterval(interval)
   }, [state.step, state.countdown, state.currentStatus])
-
-  // Helper function to get the mobile money button based on payment method
-  const getMobileMoneyButton = (paymentMethodName: string) => {
-    const reference = state.transactionId || `DEP-${Date.now()}`
-    const amount = parseFloat(state.amount).toFixed(2)
-    const accountNumber = state.agentInfo?.account_number || ''
-    const accountName = state.agentInfo?.account_name || ''
-    
-    const smsBody = `Transfert de ${amount}$ vers ${accountName}. Code référence: ${reference}`
-    
-    const buttons = {
-      'MTN Money': {
-        code: '*555#',
-        color: 'bg-yellow-600 hover:bg-yellow-700',
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
-      },
-      'Airtel Money': {
-        code: '*501#', 
-        color: 'bg-red-600 hover:bg-red-700',
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
-      },
-      'Orange Money': {
-        code: '*144#',
-        color: 'bg-orange-600 hover:bg-orange-700',
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
-      },
-      'M-Pesa': {
-        code: '*122#',
-        color: 'bg-green-600 hover:bg-green-700', 
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
-      },
-      'Africell Money': {
-        code: '*111#',
-        color: 'bg-purple-600 hover:bg-purple-700',
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
-      },
-      'Illicocash': {
-        code: '*404#',
-        color: 'bg-blue-600 hover:bg-blue-700',
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
-      }
-    }
-
-    const buttonConfig = buttons[paymentMethodName as keyof typeof buttons]
-    
-    if (!buttonConfig) return null
-
-    return (
-      <a
-        href={buttonConfig.href}
-        className={`${buttonConfig.color} text-white py-3 px-6 rounded-lg transition-colors text-center font-medium flex items-center justify-center min-w-[200px]`}
-      >
-        <Wallet className="h-5 w-5 mr-2" />
-        Ouvrir {paymentMethodName} ({buttonConfig.code})
-      </a>
-    )
-  }
 
   const setupTransactionSubscription = (transactionId: string) => {
     console.log('🔔 Setting up real-time subscription for transaction:', transactionId)
@@ -937,23 +880,17 @@ export default function DepositPage() {
                 Paiement en Attente
               </h3>
               
-              {/* Mobile Money Quick Action - Only show for relevant payment methods */}
-              {['MTN Money', 'Airtel Money', 'Orange Money', 'M-Pesa', 'Africell Money', 'Illicocash'].includes(state.agentInfo.payment_method_name) && (
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-yellow-700 mb-3">
-                    Payer Rapidement via Mobile Money
-                  </label>
-                  
-                  <div className="flex justify-center">
-                    {getMobileMoneyButton(state.agentInfo.payment_method_name)}
-                  </div>
-
-                  <p className="text-xs text-yellow-600 mt-3 text-center">
-                    Cliquez pour ouvrir l'application mobile money
-                  </p>
+              <div className="space-y-3 mb-4">
+                <div className="flex items-start space-x-2 text-sm text-yellow-700">
+                  <div className="w-2 h-2 bg-yellow-500 rounded-full mt-1.5 flex-shrink-0"></div>
+                  <span><strong>Important:</strong> Aucune donnée n'est encore enregistrée dans le système</span>
                 </div>
-              )}
-
+                <div className="flex items-start space-x-2 text-sm text-yellow-700">
+                  <div className="w-2 h-2 bg-yellow-500 rounded-full mt-1.5 flex-shrink-0"></div>
+                  <span>L'agent et la transaction seront enregistrés uniquement après l'upload de la preuve</span>
+                </div>
+              </div>
+              
               {/* Payment details */}
               <div className="space-y-4">
                 <div>
@@ -965,7 +902,7 @@ export default function DepositPage() {
                 
                 <div>
                   <label className="block text-sm font-medium text-yellow-700 mb-1">
-                    Numéro de Compte Agent
+                    Numéro de Compte
                   </label>
                   <div className="flex items-center space-x-2">
                     <p className="font-mono font-bold text-xl bg-yellow-100 p-3 rounded-lg flex-1 text-yellow-900">
@@ -981,13 +918,14 @@ export default function DepositPage() {
                     </button>
                   </div>
                   <p className="text-sm font-semibold text-yellow-900 bg-yellow-100 border border-yellow-300 rounded-lg p-2 mt-2 shadow-sm">
-                    Nom du Compte: {state.agentInfo.account_name}
-                  </p>
+  Nom du Compte: {state.agentInfo.account_name}
+</p>
+
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-yellow-700 mb-1">
-                    Montant Exact à Envoyer
+                    Montant à Envoyer
                   </label>
                   <p className="font-bold text-2xl text-yellow-600">{parseFloat(state.amount).toFixed(2)}$</p>
                 </div>
@@ -997,29 +935,6 @@ export default function DepositPage() {
                     Agent Assigné
                   </label>
                   <p className="font-medium text-yellow-900">{state.agentInfo.agent_name} ({state.agentInfo.agent_code})</p>
-                </div>
-
-                {/* Reference Code */}
-                <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3">
-                  <label className="block text-sm font-medium text-yellow-700 mb-1">
-                    Code de Référence (Important)
-                  </label>
-                  <div className="flex items-center space-x-2">
-                    <p className="font-mono font-bold text-lg text-yellow-900 flex-1">
-                      {state.transactionId || `DEP-${Date.now()}`}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => copyToClipboard(state.transactionId || `DEP-${Date.now()}`)}
-                      className="p-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors"
-                      title="Copier la référence"
-                    >
-                      <Copy className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <p className="text-xs text-yellow-700 mt-1">
-                    Incluez ce code dans la description de votre transfert pour une identification rapide
-                  </p>
                 </div>
               </div>
             </div>
@@ -1068,7 +983,7 @@ export default function DepositPage() {
                     Finalisation du paiement...
                   </div>
                 ) : (
-                  'J\'ai Effectué le Paiement'
+                  'Compléter le Paiement'
                 )}
               </button>
             </form>

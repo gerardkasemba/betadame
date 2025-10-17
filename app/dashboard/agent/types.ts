@@ -1,3 +1,4 @@
+// In your types file
 export interface Agent {
   id: string
   user_id: string
@@ -5,14 +6,18 @@ export interface Agent {
   name: string
   region: string
   balance: number
-  available_balance: number
-  platform_balance: number
   is_active: boolean
-  created_at: string
-  updated_at: string
-  verification_status: 'pending' | 'approved' | 'rejected'
+  online_status: 'online' | 'offline'
   has_bank_account: boolean
   bank_account_verified: boolean
+  verification_status: 'pending' | 'approved' | 'rejected'
+  currency_code: string
+  available_balance: number
+  platform_balance: number
+  country?: string
+  state?: string
+  created_at: string
+  updated_at: string
 }
 
 export interface Transaction {
@@ -85,6 +90,7 @@ export interface AgentWithdrawalRequest {
   status: 'pending' | 'approved' | 'rejected'
   platform_fee: number
   maintenance_fee: number
+  time_remaining: number
   net_amount: number
   rejection_reason?: string
   receipt_url?: string
