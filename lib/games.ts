@@ -17,22 +17,21 @@ export interface Move {
   sequence?: number;
   promotedToKing?: boolean;
   isMultipleJump?: boolean;
-  mustContinueFrom?: Position; // NEW: Track if this piece must continue jumping
+  mustContinueFrom?: Position;
 }
 
 export interface GameState {
   board: (Piece | null)[][];
   currentPlayer: number;
   turnNumber: number;
-  status: 'waiting' | 'active' | 'finished' | 'resigned' | 'draw';
+  status: 'waiting' | 'active' | 'finished' | 'resigned';
   winner: number | null;
   lastMove: Move | null;
   moveHistory: Move[];
   capturedPieces: { player: number; count: number }[];
   gameType: 'standard' | 'tournament' | 'timed';
-  consecutiveNonCaptureMoves: number;
-  mustContinueJumpFrom?: Position; // NEW: Position that must continue jumping
-  continuingJumpPosition?: Position; // Alias for backward compatibility
+  mustContinueJumpFrom?: Position;
+  continuingJumpPosition?: Position;
   timeControls?: {
     initialTime: number;
     increment: number;
@@ -79,9 +78,6 @@ export class ProfessionalCheckersGame {
   static readonly PLAYER1 = 1;
   static readonly PLAYER2 = 2;
   static readonly EMPTY = 0;
-  static readonly MAX_TURNS_WITHOUT_CAPTURE = 80; // Increased from 40
-  static readonly MAX_SEQUENCE_MOVES = 200; // Increased from 50
-  static readonly MAX_CONSECUTIVE_KING_MOVES = 25; // Increased from 15
 
   private static pieceCount(board: (Piece | null)[][], player: number): number {
     return board.flat().filter(piece => piece?.player === player).length;
@@ -119,6 +115,34 @@ export class ProfessionalCheckersGame {
     return board;
   }
 
+  static determineWinnerByPosition(board: (Piece | null)[][]): number {
+    const player1Pieces = this.pieceCount(board, this.PLAYER1);
+    const player2Pieces = this.pieceCount(board, this.PLAYER2);
+    
+    // If one player has no pieces, the other wins
+    if (player1Pieces === 0 && player2Pieces > 0) {
+      return this.PLAYER2;
+    }
+    if (player2Pieces === 0 && player1Pieces > 0) {
+      return this.PLAYER1;
+    }
+    
+    // Calculate material advantage
+    const player1Kings = this.kingCount(board, this.PLAYER1) ? 1 : 0;
+    const player2Kings = this.kingCount(board, this.PLAYER2) ? 1 : 0;
+    
+    const player1Material = player1Pieces + (player1Kings * 2);
+    const player2Material = player2Pieces + (player2Kings * 2);
+    
+    // If material is equal, check positional advantage
+    if (player1Material === player2Material) {
+      const positionalAdvantage = this.calculatePositionalAdvantage(board);
+      return positionalAdvantage > 0 ? this.PLAYER1 : this.PLAYER2;
+    }
+    
+    return player1Material > player2Material ? this.PLAYER1 : this.PLAYER2;
+  }
+
   static debugPrintBoard(board: (Piece | null)[][]) {
     console.log('🎯 BOARD LAYOUT:');
     for (let row = 0; row < this.BOARD_SIZE; row++) {
@@ -152,10 +176,9 @@ export class ProfessionalCheckersGame {
         { player: this.PLAYER1, count: 0 },
         { player: this.PLAYER2, count: 0 }
       ],
-      consecutiveNonCaptureMoves: 0,
       gameType,
       mustContinueJumpFrom: undefined,
-      continuingJumpPosition: undefined, // Backward compatibility
+      continuingJumpPosition: undefined,
       timeControls: gameType === 'timed' ? {
         initialTime: 600000,
         increment: 5000,
@@ -171,17 +194,15 @@ export class ProfessionalCheckersGame {
       return [];
     }
 
-    // FIXED: If must continue jump from a specific position, only allow moves from that position
     if (state.mustContinueJumpFrom) {
       if (state.mustContinueJumpFrom.row !== position.row || 
           state.mustContinueJumpFrom.col !== position.col) {
-        return []; // Can only move the piece that must continue jumping
+        return [];
       }
     }
 
     const captureMoves = this.findCaptureMoves(state.board, position, piece.player, piece.isKing);
     
-    // If must continue jumping, only return capture moves
     if (state.mustContinueJumpFrom) {
       return captureMoves;
     }
@@ -193,7 +214,6 @@ export class ProfessionalCheckersGame {
   static findAllValidMoves(state: GameState): Move[] {
     const allMoves: Move[] = [];
     
-    // FIXED: If must continue jump, only get moves from that position
     if (state.mustContinueJumpFrom) {
       return this.calculateValidMoves(state, state.mustContinueJumpFrom);
     }
@@ -241,7 +261,6 @@ export class ProfessionalCheckersGame {
     const directions = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
 
     for (const [dr, dc] of directions) {
-      // FIXED: Allow capturing multiple pieces in the same diagonal
       let distance = 1;
       
       while (distance < this.BOARD_SIZE) {
@@ -253,17 +272,16 @@ export class ProfessionalCheckersGame {
         const checkPiece = board[checkRow][checkCol];
         
         if (checkPiece?.player === player) {
-          break; // Own piece blocks
+          break;
         }
         
         if (checkPiece && checkPiece.player !== player) {
           const captureKey = `${checkRow},${checkCol}`;
           if (visited.has(captureKey)) {
             distance++;
-            continue; // Already captured this piece in this sequence
+            continue;
           }
 
-          // Look for landing positions beyond the opponent
           for (let landingDist = distance + 1; landingDist < this.BOARD_SIZE; landingDist++) {
             const landRow = position.row + dr * landingDist;
             const landCol = position.col + dc * landingDist;
@@ -288,7 +306,6 @@ export class ProfessionalCheckersGame {
 
             moves.push(captureMove);
 
-            // Try to continue capturing from new position
             const tempBoard = board.map(r => [...r]);
             tempBoard[landRow][landCol] = tempBoard[position.row][position.col];
             tempBoard[position.row][position.col] = null;
@@ -304,7 +321,7 @@ export class ProfessionalCheckersGame {
 
             moves.push(...additionalMoves);
           }
-          break; // Only capture one piece per direction per jump
+          break;
         }
         
         distance++;
@@ -360,7 +377,6 @@ export class ProfessionalCheckersGame {
 
         moves.push(captureMove);
 
-        // Create temp board for recursive checking
         const tempBoard = board.map(r => [...r]);
         tempBoard[landRow][landCol] = tempBoard[position.row][position.col];
         tempBoard[position.row][position.col] = null;
@@ -471,7 +487,6 @@ export class ProfessionalCheckersGame {
       return { isValid: false, error: "It's not this player's turn" };
     }
 
-    // FIXED: Enforce continuing jumps
     if (state.mustContinueJumpFrom) {
       if (state.mustContinueJumpFrom.row !== move.from.row || 
           state.mustContinueJumpFrom.col !== move.from.col) {
@@ -498,11 +513,9 @@ export class ProfessionalCheckersGame {
       return state;
     }
 
-    // Move the piece
     newBoard[move.to.row][move.to.col] = { ...piece };
     newBoard[move.from.row][move.from.col] = null;
 
-    // Handle captures
     let captureCount = 0;
     move.captures.forEach(capture => {
       if (newBoard[capture.row][capture.col]) {
@@ -511,7 +524,6 @@ export class ProfessionalCheckersGame {
       }
     });
 
-    // Check for promotion to king
     let promotedToKing = false;
     if (!piece.isKing) {
       const shouldPromote = (piece.player === this.PLAYER1 && move.to.row === this.BOARD_SIZE - 1) ||
@@ -526,7 +538,6 @@ export class ProfessionalCheckersGame {
       }
     }
 
-    // Update captured pieces count
     const capturedPieces = state.capturedPieces.map(cp => 
       cp.player !== state.currentPlayer 
         ? { ...cp, count: cp.count + captureCount }
@@ -538,9 +549,6 @@ export class ProfessionalCheckersGame {
       promotedToKing
     };
 
-    const consecutiveNonCaptureMoves = move.isCapture ? 0 : state.consecutiveNonCaptureMoves + 1;
-
-    // FIXED: Check for additional captures properly
     const hasMoreJumps = move.isCapture && this.hasAdditionalCaptures(
       newBoard, 
       move.to, 
@@ -548,7 +556,6 @@ export class ProfessionalCheckersGame {
       piece.isKing || promotedToKing
     );
 
-    // FIXED: Update time controls
     let updatedTimeControls = state.timeControls;
     if (state.timeControls) {
       const now = Date.now();
@@ -568,7 +575,6 @@ export class ProfessionalCheckersGame {
         }
       };
 
-      // Check for timeout
       if (newTime <= 0) {
         return this.endGameByTimeout(state, state.currentPlayer);
       }
@@ -576,26 +582,18 @@ export class ProfessionalCheckersGame {
 
     const nextPlayer = hasMoreJumps ? state.currentPlayer : this.getOpponent(state.currentPlayer);
     const mustContinueJumpFrom = hasMoreJumps ? move.to : undefined;
-    const continuingJumpPosition = mustContinueJumpFrom; // Backward compatibility alias
+    const continuingJumpPosition = mustContinueJumpFrom;
 
-    // FIXED: Only check game end if turn is complete and player has pieces
     let isGameOver = false;
     let winner: number | null = null;
     
     if (!hasMoreJumps) {
-      // FIXED: Check if current player eliminated themselves (edge case)
       const currentPlayerPieces = this.pieceCount(newBoard, state.currentPlayer);
       if (currentPlayerPieces === 0) {
         isGameOver = true;
         winner = nextPlayer;
       } else {
-        isGameOver = this.checkGameEndConditions(
-          newBoard, 
-          nextPlayer,
-          state.moveHistory.length + 1,
-          consecutiveNonCaptureMoves,
-          [...state.moveHistory, newMove]
-        );
+        isGameOver = this.checkGameEndConditions(newBoard, nextPlayer);
         
         if (isGameOver) {
           winner = state.currentPlayer;
@@ -613,9 +611,8 @@ export class ProfessionalCheckersGame {
       lastMove: newMove,
       moveHistory: [...state.moveHistory, newMove],
       capturedPieces,
-      consecutiveNonCaptureMoves,
       mustContinueJumpFrom,
-      continuingJumpPosition, // Backward compatibility
+      continuingJumpPosition,
       timeControls: updatedTimeControls
     };
   }
@@ -636,15 +633,9 @@ export class ProfessionalCheckersGame {
     return captureMoves.length > 0;
   }
 
-  static checkGameEndConditions(
-    board: (Piece | null)[][], 
-    player: number,
-    totalMoves: number,
-    consecutiveNonCaptureMoves: number,
-    moveHistory: Move[]
-  ): boolean {
+  static checkGameEndConditions(board: (Piece | null)[][], player: number): boolean {
     if (this.pieceCount(board, player) === 0) {
-      console.log(`Player ${player} has no pieces left - game should end`);
+      console.log(`Player ${player} has no pieces left - game over`);
       return true;
     }
 
@@ -657,65 +648,13 @@ export class ProfessionalCheckersGame {
       lastMove: null,
       moveHistory: [],
       capturedPieces: [],
-      consecutiveNonCaptureMoves: 0,
       gameType: 'standard'
     };
 
     const validMoves = this.findAllValidMoves(testState);
     if (validMoves.length === 0) {
-      console.log(`Player ${player} has no valid moves - game should end`);
+      console.log(`Player ${player} has no valid moves - game over`);
       return true;
-    }
-
-    if (totalMoves >= this.MAX_SEQUENCE_MOVES) {
-      console.log(`Max sequence moves reached: ${totalMoves}`);
-      return true;
-    }
-
-    if (consecutiveNonCaptureMoves >= this.MAX_TURNS_WITHOUT_CAPTURE) {
-      console.log(`Max non-capture moves reached: ${consecutiveNonCaptureMoves}`);
-      return true;
-    }
-
-    if (this.hasRepetitiveKingMoves(board, moveHistory)) {
-      console.log('Repetitive king moves detected - draw');
-      return true;
-    }
-
-    return false;
-  }
-
-  // FIXED: Properly detect repetitive king moves with stricter criteria
-  private static hasRepetitiveKingMoves(board: (Piece | null)[][], moveHistory: Move[]): boolean {
-    if (moveHistory.length < this.MAX_CONSECUTIVE_KING_MOVES * 2) return false;
-
-    const recentMoves = moveHistory.slice(-this.MAX_CONSECUTIVE_KING_MOVES * 2);
-    
-    let kingMoveCount = 0;
-    let positionCounts = new Map<string, number>();
-    
-    for (const move of recentMoves) {
-      if (move.captures.length > 0) continue; // Captures don't count
-      
-      // Check if the piece that moved was a king
-      const pieceAtDestination = board[move.to.row][move.to.col];
-      if (pieceAtDestination?.isKing || move.promotedToKing === false) {
-        kingMoveCount++;
-        
-        // Track position repetition
-        const posKey = `${move.to.row},${move.to.col}`;
-        positionCounts.set(posKey, (positionCounts.get(posKey) || 0) + 1);
-      }
-    }
-
-    // Only declare draw if there are MANY king moves AND position repetition
-    if (kingMoveCount >= this.MAX_CONSECUTIVE_KING_MOVES) {
-      // Check if any position was visited multiple times (indicating repetition)
-      for (const count of positionCounts.values()) {
-        if (count >= 3) {
-          return true; // Position visited 3+ times = clear repetition
-        }
-      }
     }
 
     return false;
@@ -750,7 +689,7 @@ export class ProfessionalCheckersGame {
     return {
       player1: totalAdvantage > 0 ? baseProbability : 1 - baseProbability,
       player2: totalAdvantage > 0 ? 1 - baseProbability : baseProbability,
-      draw: Math.max(0, 0.1 - Math.abs(totalAdvantage) * 0.05),
+      draw: 0,
       isForcedWin: false,
       forcedWinInMoves: null,
       reasons: this.generateProbabilityReasons(state, materialDiff, positionalAdvantage)
@@ -813,25 +752,6 @@ export class ProfessionalCheckersGame {
     return { isForcedWin: false, winner: null, reasons };
   }
 
-  // NEW: Determine winner when game reaches max moves (no true draw)
-  static determineWinnerByPosition(board: (Piece | null)[][]): number {
-    const evaluation = this.evaluateBoard(board);
-    const player1Pieces = this.pieceCount(board, this.PLAYER1);
-    const player2Pieces = this.pieceCount(board, this.PLAYER2);
-    
-    // If one player has more pieces, they win
-    if (player1Pieces > player2Pieces) return this.PLAYER1;
-    if (player2Pieces > player1Pieces) return this.PLAYER2;
-    
-    // If equal pieces, use board evaluation
-    if (evaluation > 0) return this.PLAYER1;
-    if (evaluation < 0) return this.PLAYER2;
-    
-    // If completely equal, player with more advanced position wins
-    const player1Advantage = this.calculatePositionalAdvantage(board);
-    return player1Advantage >= 0 ? this.PLAYER1 : this.PLAYER2;
-  }
-
   private static generateProbabilityReasons(
     state: GameState, 
     materialDiff: number, 
@@ -868,7 +788,7 @@ export class ProfessionalCheckersGame {
       possibleOutcomes: {
         winInMoves: winProbability.forcedWinInMoves,
         lossInMoves: null,
-        drawingLines: this.countDrawingLines(state)
+        drawingLines: 0
       },
       pieceCount: {
         player1: this.pieceCount(state.board, this.PLAYER1),
@@ -908,17 +828,6 @@ export class ProfessionalCheckersGame {
     }
     
     return score;
-  }
-
-  private static countDrawingLines(state: GameState): number {
-    const player1HasKing = this.kingCount(state.board, this.PLAYER1);
-    const player2HasKing = this.kingCount(state.board, this.PLAYER2);
-    const totalPieces = this.pieceCount(state.board, this.PLAYER1) + this.pieceCount(state.board, this.PLAYER2);
-    
-    if (player1HasKing && player2HasKing && totalPieces <= 4) return 3;
-    if (state.consecutiveNonCaptureMoves > 30) return 2;
-    
-    return 0;
   }
 
   private static findBestMove(state: GameState): Move | null {
@@ -978,18 +887,6 @@ export class ProfessionalCheckersGame {
     };
   }
 
-  static offerDraw(state: GameState): GameState {
-    return state;
-  }
-
-  static acceptDraw(state: GameState): GameState {
-    return {
-      ...state,
-      status: 'draw',
-      winner: null
-    };
-  }
-
   static createTournamentGameState(players: number[]): GameState {
     const state = this.createGameState('tournament');
     return state;
@@ -1003,7 +900,6 @@ export class ProfessionalCheckersGame {
     return player === this.PLAYER1 ? this.PLAYER2 : this.PLAYER1;
   }
 
-  // FIXED: Enhanced serialization with proper validation
   static serializeGameState(state: GameState): any {
     return {
       board: state.board.map(row => 
@@ -1022,15 +918,13 @@ export class ProfessionalCheckersGame {
       lastMove: state.lastMove,
       moveHistory: state.moveHistory,
       capturedPieces: state.capturedPieces,
-      consecutiveNonCaptureMoves: state.consecutiveNonCaptureMoves,
       gameType: state.gameType,
       mustContinueJumpFrom: state.mustContinueJumpFrom,
-      continuingJumpPosition: state.mustContinueJumpFrom, // Backward compatibility
+      continuingJumpPosition: state.mustContinueJumpFrom,
       timeControls: state.timeControls
     };
   }
 
-  // FIXED: Enhanced deserialization with comprehensive validation
   static deserializeGameState(data: any): GameState {
     if (!data || !data.board || !Array.isArray(data.board)) {
       console.warn('Invalid game state data, using default board');
@@ -1038,7 +932,6 @@ export class ProfessionalCheckersGame {
     }
     
     try {
-      // Validate board dimensions
       if (data.board.length !== this.BOARD_SIZE) {
         throw new Error(`Invalid board size: expected ${this.BOARD_SIZE}, got ${data.board.length}`);
       }
@@ -1051,12 +944,10 @@ export class ProfessionalCheckersGame {
         return row.map((cell: any, colIndex: number) => {
           if (!cell) return null;
           
-          // Validate player number
           if (cell.player !== this.PLAYER1 && cell.player !== this.PLAYER2) {
             throw new Error(`Invalid player number at [${rowIndex}, ${colIndex}]: ${cell.player}`);
           }
           
-          // Validate piece is on valid square (dark square)
           if ((rowIndex + colIndex) % 2 === 0) {
             throw new Error(`Piece on invalid square at [${rowIndex}, ${colIndex}]`);
           }
@@ -1069,20 +960,16 @@ export class ProfessionalCheckersGame {
         });
       });
 
-      // Validate current player
       const currentPlayer = (data.currentPlayer === this.PLAYER1 || data.currentPlayer === this.PLAYER2) 
         ? data.currentPlayer 
         : this.PLAYER1;
 
-      // Validate status
-      const validStatuses = ['waiting', 'active', 'finished', 'resigned', 'draw'];
+      const validStatuses = ['waiting', 'active', 'finished', 'resigned'];
       const status = validStatuses.includes(data.status) ? data.status : 'active';
 
-      // Validate game type
       const validGameTypes = ['standard', 'tournament', 'timed'];
       const gameType = validGameTypes.includes(data.gameType) ? data.gameType : 'standard';
 
-      // Validate captured pieces structure
       let capturedPieces = data.capturedPieces;
       if (!Array.isArray(capturedPieces) || capturedPieces.length !== 2) {
         capturedPieces = [
@@ -1091,15 +978,13 @@ export class ProfessionalCheckersGame {
         ];
       }
 
-      // Validate mustContinueJumpFrom if present
-      let mustContinueJumpFrom = data.mustContinueJumpFrom || data.continuingJumpPosition; // Support both names
+      let mustContinueJumpFrom = data.mustContinueJumpFrom || data.continuingJumpPosition;
       if (mustContinueJumpFrom) {
         if (!this.isValidPosition(mustContinueJumpFrom.row, mustContinueJumpFrom.col)) {
           mustContinueJumpFrom = undefined;
         }
       }
 
-      // Validate time controls if present
       let timeControls = data.timeControls;
       if (timeControls) {
         if (typeof timeControls.initialTime !== 'number' || 
@@ -1119,10 +1004,9 @@ export class ProfessionalCheckersGame {
         lastMove: data.lastMove || null,
         moveHistory: Array.isArray(data.moveHistory) ? data.moveHistory : [],
         capturedPieces,
-        consecutiveNonCaptureMoves: Math.max(0, data.consecutiveNonCaptureMoves || 0),
         gameType,
         mustContinueJumpFrom,
-        continuingJumpPosition: mustContinueJumpFrom, // Backward compatibility
+        continuingJumpPosition: mustContinueJumpFrom,
         timeControls
       };
     } catch (error) {
@@ -1171,25 +1055,19 @@ export class TournamentManager {
   }
 
   static calculateTournamentStandings(matches: any[]) {
-    const standings: { [player: number]: { wins: number; losses: number; draws: number; points: number } } = {};
+    const standings: { [player: number]: { wins: number; losses: number; points: number } } = {};
 
     matches.forEach(match => {
       if (match.winner) {
         const winner = match.winner;
         const loser = match.player1 === winner ? match.player2 : match.player1;
 
-        if (!standings[winner]) standings[winner] = { wins: 0, losses: 0, draws: 0, points: 0 };
-        if (!standings[loser]) standings[loser] = { wins: 0, losses: 0, draws: 0, points: 0 };
+        if (!standings[winner]) standings[winner] = { wins: 0, losses: 0, points: 0 };
+        if (!standings[loser]) standings[loser] = { wins: 0, losses: 0, points: 0 };
 
         standings[winner].wins++;
         standings[winner].points += 2;
         standings[loser].losses++;
-      } else if (match.status === 'draw') {
-        [match.player1, match.player2].forEach(player => {
-          if (!standings[player]) standings[player] = { wins: 0, losses: 0, draws: 0, points: 0 };
-          standings[player].draws++;
-          standings[player].points += 1;
-        });
       }
     });
 

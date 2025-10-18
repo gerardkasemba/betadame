@@ -1,4 +1,4 @@
-// app/dashboard/game/p/[id]/page.tsx - Updated with fixed checkers logic
+// app/dashboard/game/p/[id]/page.tsx - Updated with NO DRAWS
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -9,7 +9,6 @@ import { createClient } from '@/lib/supabase/client';
 import { GameAnalysis } from '@/lib/games';
 import GameBoard from '../../components/GameBoard';
 
-// Utility function for position conversion
 const PositionConverter = {
   toDb: (row: number, col: number): number => {
     return row * 10 + col;
@@ -67,7 +66,7 @@ interface ExtendedGameState extends GameState {
   selectedPiece: Position | null;
   validMoves: Move[];
   mustContinueJumpFrom?: Position;
-  continuingJumpPosition?: Position; // Backward compatibility alias
+  continuingJumpPosition?: Position;
 }
 
 interface OpponentMove {
@@ -76,10 +75,11 @@ interface OpponentMove {
   timestamp: number;
 }
 
+// UPDATED: Removed 'draw' type
 interface GameResult {
   title: string; 
   message: string; 
-  type: 'win' | 'lose' | 'draw';
+  type: 'win' | 'lose';
   reason?: string;
   prize?: number;
 }
@@ -137,7 +137,6 @@ const translations = {
   victoryByResignation: "Victoire par abandon!",
   victoryByTimeout: "Victoire par temps écoulé!",
   victoryByMaterial: "Victoire par avantage matériel!",
-  draw: "Match nul!",
   yourVictory: "Votre victoire!",
   yourDefeat: "Défaite",
   opponentMove: "L'adversaire a déplacé de {from} à {to}",
@@ -257,7 +256,6 @@ export default function GamePage() {
   useEffect(() => {
     if (!gameRoomId || !gameRoom) return;
 
-    // Clean up existing channels
     if (gameChannelRef.current) {
       gameChannelRef.current.unsubscribe();
     }
@@ -265,7 +263,6 @@ export default function GamePage() {
       selectionChannelRef.current.unsubscribe();
     }
 
-    // Game room updates channel
     gameChannelRef.current = supabase
       .channel(`game-room-${gameRoomId}`)
       .on(
@@ -300,35 +297,28 @@ export default function GamePage() {
       )
       .subscribe();
 
-    // Selection updates channel with ALL events
     selectionChannelRef.current = supabase
       .channel(`game-selections-${gameRoomId}`)
       .on(
         'postgres_changes',
         {
-          event: '*', // Listen to ALL events (INSERT, UPDATE, DELETE)
+          event: '*',
           schema: 'public',
           table: 'piece_selections',
           filter: `game_room_id=eq.${gameRoomId}`,
         },
         (payload) => {
-          console.log('Selection channel event:', payload.eventType, payload);
-          
           if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
             handleOpponentSelection(payload.new);
           } else if (payload.eventType === 'DELETE') {
-            // Only clear if it was the opponent's selection
             if (payload.old && userProfile && payload.old.user_id !== userProfile.id) {
-              console.log('Opponent deselected');
               setOpponentSelectedPiece(null);
               setOpponentValidMoves([]);
             }
           }
         }
       )
-      .subscribe((status) => {
-        console.log('Selection channel status:', status);
-      });
+      .subscribe();
 
     return () => {
       if (gameChannelRef.current) {
@@ -425,7 +415,6 @@ export default function GamePage() {
     if (!userProfile || !gameRoomId || !playerNumber) return;
 
     try {
-      // First, delete any existing selections for this user
       const { error: deleteError } = await supabase
         .from('piece_selections')
         .delete()
@@ -433,13 +422,7 @@ export default function GamePage() {
         .eq('user_id', userProfile.id);
 
       if (deleteError) {
-        console.error('Error deleting previous selection:', {
-          error: deleteError,
-          message: deleteError.message,
-          details: deleteError.details,
-          hint: deleteError.hint,
-          code: deleteError.code
-        });
+        console.error('Error deleting previous selection:', deleteError);
       }
 
       if (!position) return;
@@ -447,15 +430,7 @@ export default function GamePage() {
       const dbPosition = PositionConverter.toDb(position.row, position.col);
       const dbValidMoves = validMoves.map(pos => PositionConverter.toDb(pos.row, pos.col));
 
-      console.log('Broadcasting selection:', {
-        position: dbPosition,
-        validMoves: dbValidMoves,
-        playerNumber,
-        userId: userProfile.id,
-        gameRoomId
-      });
-
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('piece_selections')
         .insert({
           game_room_id: gameRoomId,
@@ -463,19 +438,10 @@ export default function GamePage() {
           player_number: playerNumber,
           position: dbPosition,
           valid_moves: dbValidMoves
-        })
-        .select();
+        });
 
       if (error) {
-        console.error('Error broadcasting selection:', {
-          error,
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code
-        });
-      } else {
-        console.log('Selection broadcasted successfully:', data);
+        console.error('Error broadcasting selection:', error);
       }
     } catch (err) {
       console.error('Exception in broadcastPieceSelection:', err);
@@ -484,27 +450,20 @@ export default function GamePage() {
 
   const handleOpponentSelection = useCallback(async (selection: any) => {
     if (!userProfile || selection.user_id === userProfile.id) {
-      console.log('Ignoring own selection');
       return;
     }
 
-    console.log('Received opponent selection:', selection);
-
     if (selection.position !== null && selection.position !== undefined) {
       const selectedPos = PositionConverter.fromDb(selection.position);
-      console.log('Opponent selected piece at:', selectedPos);
       setOpponentSelectedPiece(selectedPos);
       
       if (selection.valid_moves && Array.isArray(selection.valid_moves)) {
         const validMoves = selection.valid_moves.map((pos: number) => PositionConverter.fromDb(pos));
-        console.log('Opponent valid moves:', validMoves);
         setOpponentValidMoves(validMoves);
       } else {
-        console.log('No valid moves in selection');
         setOpponentValidMoves([]);
       }
     } else {
-      console.log('Opponent deselected piece');
       setOpponentSelectedPiece(null);
       setOpponentValidMoves([]);
     }
@@ -538,40 +497,31 @@ export default function GamePage() {
     }
   }, [userProfile, gameRoom, gameState, playerNumber, participants, gameRoomId]);
 
-  const showGameResultMessage = useCallback((reason: 'checkmate' | 'resignation' | 'timeout' | 'material' | 'draw', winner?: number) => {
+  // UPDATED: Removed draw case - always requires a winner
+  const showGameResultMessage = useCallback((reason: 'checkmate' | 'resignation' | 'timeout' | 'material', winner: number) => {
     const isWinner = winner === playerNumber;
     const prizeAmount = isWinner ? totalBetAmount : 0;
     
     let title = '';
     let message = '';
-    let type: 'win' | 'lose' | 'draw' = 'draw';
+    let type: 'win' | 'lose' = isWinner ? 'win' : 'lose';
 
     switch (reason) {
       case 'checkmate':
         title = isWinner ? getTranslation('yourVictory') : getTranslation('yourDefeat');
         message = getTranslation('victoryByCheckmate');
-        type = isWinner ? 'win' : 'lose';
         break;
       case 'resignation':
         title = isWinner ? getTranslation('yourVictory') : getTranslation('yourDefeat');
         message = getTranslation('victoryByResignation');
-        type = isWinner ? 'win' : 'lose';
         break;
       case 'timeout':
         title = isWinner ? getTranslation('yourVictory') : getTranslation('yourDefeat');
         message = getTranslation('victoryByTimeout');
-        type = isWinner ? 'win' : 'lose';
         break;
       case 'material':
         title = isWinner ? getTranslation('yourVictory') : getTranslation('yourDefeat');
         message = 'Victoire par avantage positionnel!';
-        type = isWinner ? 'win' : 'lose';
-        break;
-      case 'draw':
-        // This should rarely happen now
-        title = getTranslation('draw');
-        message = 'Match nul - les mises sont retournées';
-        type = 'draw';
         break;
     }
 
@@ -634,14 +584,10 @@ export default function GamePage() {
     if (!userProfile || !gameRoomId) return;
 
     try {
-      console.log('Loading initial selections for game:', gameRoomId);
-      
       const { data: selections, error } = await supabase
         .from('piece_selections')
         .select('*')
         .eq('game_room_id', gameRoomId);
-
-      console.log('Initial selections loaded:', selections);
 
       if (error) {
         console.error('Error loading selections:', error);
@@ -651,7 +597,6 @@ export default function GamePage() {
       if (selections && selections.length > 0) {
         selections.forEach(selection => {
           if (selection.user_id !== userProfile.id) {
-            console.log('Processing opponent selection:', selection);
             handleOpponentSelection(selection);
           }
         });
@@ -665,7 +610,6 @@ export default function GamePage() {
     if (!gameRoom || !userProfile) return;
 
     try {
-      // Calculate final game analysis if not already available
       let finalAnalysis = gameAnalysis;
       if (!finalAnalysis) {
         try {
@@ -684,7 +628,7 @@ export default function GamePage() {
         final_board_state: ProfessionalCheckersGame.serializeGameState(gameState),
         total_turns: gameState.turnNumber,
         total_moves: gameState.moveHistory.length,
-        game_analysis: finalAnalysis, // Now always has analysis or null
+        game_analysis: finalAnalysis,
         bet_amount: gameRoom.bet_amount,
         prize_distributed: totalBetAmount,
         game_duration: Math.floor((Date.now() - new Date(gameRoom.created_at).getTime()) / 1000),
@@ -695,10 +639,10 @@ export default function GamePage() {
       await updatePlayerRatings(winnerId, participants);
     } catch (err) {
       console.error('Error saving game result:', err);
-      // Silent fail but log the error
     }
   };
 
+  // UPDATED: Removed draw case (0.5 score)
   const updatePlayerRatings = async (winnerId: string | null, participants: GameParticipant[]) => {
     try {
       const player1 = participants.find(p => p.player_number === 1);
@@ -710,8 +654,8 @@ export default function GamePage() {
       const expected1 = 1 / (1 + Math.pow(10, ((player2.profiles?.rating || 1200) - (player1.profiles?.rating || 1200)) / 400));
       const expected2 = 1 - expected1;
 
-      const actual1 = winnerId === player1.user_id ? 1 : winnerId === player2.user_id ? 0 : 0.5;
-      const actual2 = 1 - actual1;
+      const actual1 = winnerId === player1.user_id ? 1 : 0;
+      const actual2 = winnerId === player2.user_id ? 1 : 0;
 
       const newRating1 = Math.round((player1.profiles?.rating || 1200) + K * (actual1 - expected1));
       const newRating2 = Math.round((player2.profiles?.rating || 1200) + K * (actual2 - expected2));
@@ -892,6 +836,7 @@ export default function GamePage() {
     }
   };
 
+  // UPDATED: Removed draw case - always expects a winner
   const handleGameRoomUpdate = useCallback((room: GameRoom) => {
     setGameRoom(room);
 
@@ -914,21 +859,20 @@ export default function GamePage() {
       const winnerParticipant = participants.find(p => p.user_id === room.winner_id);
       const winner = winnerParticipant?.player_number;
       
-      let reason: 'checkmate' | 'resignation' | 'timeout' | 'material' | 'draw' = 'checkmate';
-      
       if (!winner) {
-        reason = 'draw';
-      } else {
-        const loser = ProfessionalCheckersGame.getOpponent(winner);
-        const testState: GameState = {
-          ...newGameState,
-          currentPlayer: loser,
-          status: 'active'
-        };
-        
-        const validMoves = ProfessionalCheckersGame.findAllValidMoves(testState);
-        reason = validMoves.length === 0 ? 'checkmate' : 'resignation';
+        console.error('No winner found - this should not happen in no-draw mode!');
+        return;
       }
+      
+      const loser = ProfessionalCheckersGame.getOpponent(winner);
+      const testState: GameState = {
+        ...newGameState,
+        currentPlayer: loser,
+        status: 'active'
+      };
+      
+      const validMoves = ProfessionalCheckersGame.findAllValidMoves(testState);
+      const reason = validMoves.length === 0 ? 'checkmate' : 'resignation';
       
       showGameResultMessage(reason, winner);
     }
@@ -938,7 +882,7 @@ export default function GamePage() {
       selectedPiece: prev?.selectedPiece || null,
       validMoves: prev?.validMoves || [],
       mustContinueJumpFrom: newGameState.mustContinueJumpFrom,
-      continuingJumpPosition: newGameState.mustContinueJumpFrom, // Sync alias
+      continuingJumpPosition: newGameState.mustContinueJumpFrom,
     }));
 
     setTimeLeft(30);
@@ -1007,7 +951,6 @@ export default function GamePage() {
     }
   };
 
-  // FIXED: Proper piece selection with continuing jump validation
   const handleCellClick = async (row: number, col: number) => {
     if (!userProfile || !gameRoom || gameRoom.status !== 'playing') {
       showToast(`La partie est ${gameRoom?.status || 'waiting'}`);
@@ -1029,7 +972,6 @@ export default function GamePage() {
       return;
     }
 
-    // If we have a selected piece and are trying to move it
     if (gameState.selectedPiece) {
       const move = gameState.validMoves.find((m: Move) => 
         m.from.row === gameState.selectedPiece!.row &&
@@ -1052,7 +994,6 @@ export default function GamePage() {
       }
     }
 
-    // FIXED: Check if there's a continuing jump position (supports both property names)
     const continuingJump = gameState.mustContinueJumpFrom || gameState.continuingJumpPosition;
     if (continuingJump) {
       if (row !== continuingJump.row || col !== continuingJump.col) {
@@ -1100,7 +1041,6 @@ export default function GamePage() {
     }
   };
 
-  // FIXED: Complete move validation and error recovery with multi-jump support
   const makeMove = async (move: Move) => {
     if (!userProfile || !gameRoom || isProcessingMove) return;
 
@@ -1113,12 +1053,10 @@ export default function GamePage() {
         throw new Error('No piece at starting position');
       }
 
-      // Check sufficient balance
       if (gameRoom.bet_amount > 0 && userProfile.balance < gameRoom.bet_amount) {
         throw new Error('Solde insuffisant');
       }
 
-      // Proper move validation
       const isValidMove = gameState.validMoves.some(
         (validMove: Move) => 
           validMove.from.row === move.from.row && 
@@ -1132,7 +1070,6 @@ export default function GamePage() {
         throw new Error('Move is not valid');
       }
 
-      // Validate captured pieces exist
       if (move.captures && move.captures.length > 0) {
         for (const capturePos of move.captures) {
           const capturedPiece = gameState.board[capturePos.row][capturePos.col];
@@ -1142,7 +1079,6 @@ export default function GamePage() {
         }
       }
 
-      // Calculate new game state locally first
       const newGameState: ExtendedGameState = {
         ...ProfessionalCheckersGame.makeMove(gameState, move),
         selectedPiece: null,
@@ -1150,12 +1086,10 @@ export default function GamePage() {
       };
       tempBoardState = newGameState;
 
-      // Show king promotion animation
       if (move.promotedToKing) {
         showToast(getTranslation('promotedToKing'), 'success');
       }
 
-      // Animate after validation
       setAnimatingPiece({
         piece,
         from: move.from,
@@ -1176,7 +1110,6 @@ export default function GamePage() {
         };
       }
 
-      // Proper turn number calculation with multi-jump support
       const { data: latestMoves } = await supabase
         .from('game_moves')
         .select('turn_number, move_number')
@@ -1190,19 +1123,15 @@ export default function GamePage() {
       if (latestMoves && latestMoves.length > 0) {
         const lastMove = latestMoves[0];
         
-        // FIXED: Check both property names for continuing jump
         const isContinuingJump = finalGameState.mustContinueJumpFrom || finalGameState.continuingJumpPosition;
         
         if (isContinuingJump) {
-          // Continuing jump - same turn number
           turnNumber = lastMove.turn_number;
           moveNumber = lastMove.move_number + 1;
         } else if (newGameState.currentPlayer === gameState.currentPlayer) {
-          // Multi-jump completed in same turn
           turnNumber = lastMove.turn_number;
           moveNumber = lastMove.move_number + 1;
         } else {
-          // Turn changed
           turnNumber = lastMove.turn_number + 1;
           moveNumber = 1;
         }
@@ -1224,7 +1153,6 @@ export default function GamePage() {
         }
       }
 
-      // Retry mechanism for network failures
       let retryCount = 0;
       let roomUpdateSuccess = false;
       
@@ -1268,7 +1196,7 @@ export default function GamePage() {
         selectedPiece: null,
         validMoves: [],
         mustContinueJumpFrom: finalGameState.mustContinueJumpFrom,
-        continuingJumpPosition: finalGameState.mustContinueJumpFrom, // Sync alias
+        continuingJumpPosition: finalGameState.mustContinueJumpFrom,
       });
       setAnimatingPiece(null);
       setTimeLeft(30);
@@ -1278,16 +1206,11 @@ export default function GamePage() {
       if (finalGameState.status === 'finished') {
         if (finalGameState.winner) {
           await handleGameFinish(finalGameState.winner, gameStateCheck.reason as any);
-        } else {
-          // This should not happen anymore since we always determine a winner
-          showGameResultMessage('draw');
         }
       }
     } catch (err) {
-      // Proper error state cleanup
       setAnimatingPiece(null);
       
-      // Rollback to previous state on error
       if (tempBoardState === null) {
         setGameState(prev => ({
           ...prev,
@@ -1310,10 +1233,10 @@ export default function GamePage() {
     }
   };
 
-  const checkCurrentGameState = (state: ExtendedGameState): { shouldEnd: boolean; winner: number | null; reason: string } => {
+  // UPDATED: Always returns a winner - no null winner
+  const checkCurrentGameState = (state: ExtendedGameState): { shouldEnd: boolean; winner: number; reason: string } => {
     const validMoves = ProfessionalCheckersGame.findAllValidMoves(state);
     
-    // Check if current player has no valid moves - opponent wins
     if (validMoves.length === 0) {
       return {
         shouldEnd: true,
@@ -1322,57 +1245,142 @@ export default function GamePage() {
       };
     }
     
-    // Check for draw conditions (max moves, repetition, etc.)
     const shouldEnd = ProfessionalCheckersGame.checkGameEndConditions(
       state.board,
-      state.currentPlayer,
-      state.moveHistory.length,
-      state.consecutiveNonCaptureMoves,
-      state.moveHistory
+      state.currentPlayer
     );
     
     if (shouldEnd) {
-      // FIXED: No true draws - determine winner by position
       const winner = ProfessionalCheckersGame.determineWinnerByPosition(state.board);
       return {
         shouldEnd: true,
         winner: winner,
-        reason: 'material' // Game reached max moves, winner determined by position
+        reason: 'material'
       };
     }
     
     return {
       shouldEnd: false,
-      winner: null,
+      winner: state.currentPlayer,
       reason: ''
     };
   };
 
-  const handleGameFinish = async (winnerPlayerNumber: number | null, reason: 'checkmate' | 'resignation' | 'timeout' | 'material') => {
+  // UPDATED: Always requires a winner
+  const handleGameFinish = async (winnerPlayerNumber: number, reason: 'checkmate' | 'resignation' | 'timeout' | 'material') => {
     if (!gameRoom || !userProfile) return;
 
     try {
-      // IMPROVED: Ensure we always have a winner
-      if (winnerPlayerNumber === null) {
-        console.warn('Winner is null, determining by position');
-        winnerPlayerNumber = ProfessionalCheckersGame.determineWinnerByPosition(gameState.board);
-      }
-
       const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
       const winnerId = winnerParticipant?.user_id || null;
 
-      // Save game result
       await saveGameResult(winnerId);
 
-      // Distribute prize money
       if (gameRoom.bet_amount && gameRoom.bet_amount > 0) {
         await distributePrizeMoney(winnerPlayerNumber);
       }
 
-      // Show result message
       showGameResultMessage(reason, winnerPlayerNumber);
     } catch (err) {
       console.error('Error finishing game:', err);
+    }
+  };
+
+  // UPDATED: No draw distribution - winner takes all
+  const distributePrizeMoney = async (winnerPlayerNumber: number) => {
+    if (!gameRoom || !userProfile) return;
+
+    try {
+      const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
+      if (!winnerParticipant) {
+        console.error('Winner participant not found');
+        return;
+      }
+
+      const prizeAmount = totalBetAmount;
+
+      try {
+        const { error: rpcError } = await supabase.rpc('update_user_balance', {
+          user_id: winnerParticipant.user_id,
+          amount: prizeAmount,
+        });
+
+        if (rpcError) {
+          throw rpcError;
+        }
+      } catch (rpcErr) {
+        const { data: winnerProfile } = await supabase
+          .from('profiles')
+          .select('balance')
+          .eq('id', winnerParticipant.user_id)
+          .single();
+
+        if (winnerProfile) {
+          await supabase
+            .from('profiles')
+            .update({ balance: winnerProfile.balance + prizeAmount })
+            .eq('id', winnerParticipant.user_id);
+        }
+      }
+
+      await supabase
+        .from('transactions')
+        .insert({
+          user_id: winnerParticipant.user_id,
+          type: 'game_win',
+          amount: prizeAmount,
+          status: 'completed',
+          reference: `GAME-WIN-${gameRoom.id}`,
+          description: `Won checkers game - ${prizeAmount}$`,
+        });
+
+      console.log(`Prize of ${prizeAmount}$ awarded to player ${winnerPlayerNumber}`);
+    } catch (err) {
+      console.error('Error distributing prize money:', err);
+    }
+  };
+
+  const resignGame = async () => {
+    if (!userProfile || !gameRoom || gameState.status === 'finished' || !playerNumber) {
+      setShowResignConfirm(false);
+      return;
+    }
+
+    try {
+      const winnerPlayerNumber = ProfessionalCheckersGame.getOpponent(playerNumber);
+      const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
+      
+      if (!winnerParticipant) {
+        throw new Error('Winner participant not found');
+      }
+
+      const { error: updateError } = await supabase
+        .from('game_rooms')
+        .update({
+          status: 'finished',
+          winner_id: winnerParticipant.user_id,
+          board_state: ProfessionalCheckersGame.serializeGameState({
+            ...gameState,
+            status: 'finished',
+            winner: winnerPlayerNumber
+          })
+        })
+        .eq('id', gameRoomId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      await handleGameFinish(winnerPlayerNumber, 'resignation');
+      
+      showToast(getTranslation('resignSuccess'), 'success');
+      setShowResignConfirm(false);
+      
+      await refreshUserBalance();
+    } catch (err) {
+      console.error('Error resigning game:', err);
+      showToast('Erreur lors de l\'abandon');
+      setShowResignConfirm(false);
     }
   };
 
@@ -1403,116 +1411,6 @@ export default function GamePage() {
       showToast('Revanche créée!', 'success');
     } catch (err: any) {
       showToast('Erreur lors de la création de la revanche');
-    }
-  };
-
-  const distributePrizeMoney = async (winnerPlayerNumber: number | null) => {
-    if (!gameRoom || !userProfile) return;
-
-    try {
-      // REMOVED: Draw handling - should never happen now
-      if (winnerPlayerNumber === null) {
-        console.error('Winner is null - this should not happen');
-        // Fallback: determine winner by position
-        winnerPlayerNumber = ProfessionalCheckersGame.determineWinnerByPosition(gameState.board);
-      }
-
-      const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
-      if (!winnerParticipant) {
-        console.error('Winner participant not found');
-        return;
-      }
-
-      const prizeAmount = totalBetAmount;
-
-      // Award prize to winner using RPC function
-      try {
-        const { error: rpcError } = await supabase.rpc('update_user_balance', {
-          user_id: winnerParticipant.user_id,
-          amount: prizeAmount,
-        });
-
-        if (rpcError) {
-          throw rpcError;
-        }
-      } catch (rpcErr) {
-        // Fallback: direct update
-        const { data: winnerProfile } = await supabase
-          .from('profiles')
-          .select('balance')
-          .eq('id', winnerParticipant.user_id)
-          .single();
-
-        if (winnerProfile) {
-          await supabase
-            .from('profiles')
-            .update({ balance: winnerProfile.balance + prizeAmount })
-            .eq('id', winnerParticipant.user_id);
-        }
-      }
-
-      // Record transaction
-      await supabase
-        .from('transactions')
-        .insert({
-          user_id: winnerParticipant.user_id,
-          type: 'game_win',
-          amount: prizeAmount,
-          status: 'completed',
-          reference: `GAME-WIN-${gameRoom.id}`,
-          description: `Won checkers game - ${prizeAmount}$`
-        });
-
-      console.log(`Prize of ${prizeAmount}$ awarded to player ${winnerPlayerNumber}`);
-    } catch (err) {
-      console.error('Error distributing prize money:', err);
-    }
-  };
-
-  const resignGame = async () => {
-    if (!userProfile || !gameRoom || gameState.status === 'finished' || !playerNumber) {
-      setShowResignConfirm(false);
-      return;
-    }
-
-    try {
-      const winnerPlayerNumber = ProfessionalCheckersGame.getOpponent(playerNumber);
-      const winnerParticipant = participants.find(p => p.player_number === winnerPlayerNumber);
-      
-      if (!winnerParticipant) {
-        throw new Error('Winner participant not found');
-      }
-
-      // Update game room status
-      const { error: updateError } = await supabase
-        .from('game_rooms')
-        .update({
-          status: 'finished',
-          winner_id: winnerParticipant.user_id,
-          board_state: ProfessionalCheckersGame.serializeGameState({
-            ...gameState,
-            status: 'finished',
-            winner: winnerPlayerNumber
-          })
-        })
-        .eq('id', gameRoomId);
-
-      if (updateError) {
-        throw updateError;
-      }
-
-      // Distribute prize money to winner
-      await handleGameFinish(winnerPlayerNumber, 'resignation');
-      
-      showToast(getTranslation('resignSuccess'), 'success');
-      setShowResignConfirm(false);
-      
-      // Refresh balance to show deduction
-      await refreshUserBalance();
-    } catch (err) {
-      console.error('Error resigning game:', err);
-      showToast('Erreur lors de l\'abandon');
-      setShowResignConfirm(false);
     }
   };
 
@@ -1626,17 +1524,16 @@ export default function GamePage() {
         </div>
       )}
 
+      {/* UPDATED: No draw styling - only win/lose */}
       {showGameResult && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className={`bg-white rounded-lg p-8 max-w-md text-center ${
-            showGameResult.type === 'win' ? 'border-4 border-yellow-400' : 
-            showGameResult.type === 'lose' ? 'border-4 border-red-400' : 'border-4 border-gray-400'
+            showGameResult.type === 'win' ? 'border-4 border-yellow-400' : 'border-4 border-red-400'
           }`}>
             <div className={`text-6xl mb-4 ${
-              showGameResult.type === 'win' ? 'text-yellow-500' : 
-              showGameResult.type === 'lose' ? 'text-red-500' : 'text-gray-500'
+              showGameResult.type === 'win' ? 'text-yellow-500' : 'text-red-500'
             }`}>
-              {showGameResult.type === 'win' ? '🎉' : showGameResult.type === 'lose' ? '😔' : '🤝'}
+              {showGameResult.type === 'win' ? '🎉' : '😔'}
             </div>
 
             <h2 className="text-3xl font-bold mb-2">{showGameResult.title}</h2>
@@ -2119,7 +2016,7 @@ export default function GamePage() {
                     <span className="text-lg font-bold text-[#222]">{totalBetAmount} $</span>
                   </div>
                   <div className="text-xs text-gray-600 mt-1 text-right">
-                    Le gagnant remporte {totalBetAmount} $
+                    Le gagnant remporte {totalBetAmount} $ 💰
                   </div>
                 </div>
               </div>

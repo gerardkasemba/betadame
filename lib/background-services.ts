@@ -411,7 +411,8 @@ export class TimeoutService {
 
       console.log(`🔄 Processing ${dueCycles.length} due tontine cycles`)
 
-      for (const cycle of dueCycles as TontineCycle[]) {
+      // Use type assertion
+      for (const cycle of dueCycles as unknown as TontineCycle[]) {
         await this.processTontineCyclePayments(cycle)
       }
     } catch (error) {

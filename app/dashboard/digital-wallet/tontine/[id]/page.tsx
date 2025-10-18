@@ -61,6 +61,7 @@ interface TontineCycle {
 
 interface TontineContribution {
   id: string
+  cycle_id: string
   user_id: string
   amount: number
   status: 'pending' | 'paid' | 'missed'
@@ -852,6 +853,8 @@ export default function TontineDetailPage() {
                 { id: 'payouts' as const, name: 'Paiements', icon: CheckCircle },
               ].map((tab) => {
                 const Icon = tab.icon
+                const hasBadge = 'badge' in tab && tab.badge !== undefined && tab.badge > 0
+                
                 return (
                   <button
                     key={tab.id}
@@ -864,7 +867,7 @@ export default function TontineDetailPage() {
                   >
                     <Icon className="h-4 w-4 mr-2 flex-shrink-0" />
                     {tab.name}
-                    {'badge' in tab && tab.badge > 0 && (
+                    {hasBadge && (
                       <span className="ml-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
                         {tab.badge}
                       </span>
