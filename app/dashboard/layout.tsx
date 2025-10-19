@@ -3,8 +3,8 @@ import { getSession } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import DashboardNav from '@/components/dashboard-nav'
 import ClientDashboard from './client-dashboard'
-import { GlobalGameNotifier } from '@/components/GlobalGameNotifier'
 import { createClient } from '@/lib/supabase/server'
+import QuickCreateGameButton from '@/components/quick-create-game-button'
 
 export default async function DashboardLayout({
   children,
@@ -23,16 +23,15 @@ export default async function DashboardLayout({
 
   return (
     <ClientDashboard>
-      <GlobalGameNotifier userId={user?.id || null}>
-        <div className="min-h-screen bg-gray-50">
-          <DashboardNav />
-          <main className="py-8">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              {children}
-            </div>
-          </main>
-        </div>
-      </GlobalGameNotifier>
+      <div className="min-h-screen bg-gray-50">
+        <DashboardNav />
+        <main className="py-8">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            {children}
+            <QuickCreateGameButton />
+          </div>
+        </main>
+      </div>
     </ClientDashboard>
   )
 }

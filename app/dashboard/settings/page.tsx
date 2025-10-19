@@ -18,7 +18,6 @@ import {
 } from 'lucide-react'
 import { fr } from '@/lib/i18n'
 import { createClient } from '@/lib/supabase/client'
-import { PushyRegisterButton } from '@/components/PushyRegisterButton';
 
 interface Profile {
   id: string
@@ -566,7 +565,6 @@ export default function SettingsPage() {
                   </div>
                 ))}
 
-                <PushyRegisterButton />
               </div>
 
               <div className="flex justify-end">

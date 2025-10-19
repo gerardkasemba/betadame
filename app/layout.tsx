@@ -1,53 +1,38 @@
-"use client"
+import type { Metadata } from "next"
+import RootLayout from "./client-component"
 
-import './globals.css'
-import { AuthProvider } from './auth-provider'
-import Footer from '@/components/footer'
-import { ToastProvider } from '@/contexts/ToastContext'
-import { ToastContainer } from '@/components/ToastContainer'
-import { timeoutService } from '@/lib/background-services'
-import { PushyProvider } from '@/components/PushyProvider'
-import { useEffect } from 'react'
-import Head from 'next/head'
+export const metadata: Metadata = {
+  title: "BetaDame — Joue, Défie et Gagne",
+  description:
+    "BetaDame est une plateforme congolaise de jeux d’argent où les joueurs s’affrontent au jeu de dames pour gagner de l’argent en temps réel. Joue, défie et célèbre ta victoire.",
+  keywords: [
+    "BetaDame",
+    "jeux de dames congolais",
+    "jouer pour de l’argent",
+    "jeux africains",
+    "dames en ligne",
+    "défi entre joueurs",
+    "esport Congo",
+  ],
+  openGraph: {
+    title: "BetaDame — Joue, Défie et Gagne",
+    description:
+      "Rejoins BetaDame, l’arène congolaise des joueurs où tradition et compétition se rencontrent. Joue au jeu de dames et gagne de l’argent réel.",
+    url: "https://betadame.vercel.app",
+    type: "website",
+    images: ["/og-image.png"],
+    locale: "fr_FR",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "BetaDame — Joue, Défie et Gagne",
+    description:
+      "Affronte d’autres joueurs au jeu de dames congolais pour gagner de l’argent réel. Joue et montre ton talent sur BetaDame.",
+    images: ["/og-image.png"],
+  },
+  manifest: "/manifest.json",
+}
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  useEffect(() => {
-    timeoutService.start()
-    return () => {
-      timeoutService.stop()
-    }
-  }, [])
-
-  return (
-    <html lang="en">
-      <Head>
-        <title>Betadame - Congolese Checkers</title>
-        <meta name="description" content="Real-time Congolese checker board game for money" />
-        <link rel="manifest" href="/manifest.json" />
-        <meta name="theme-color" content="#001370ff" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        <meta name="apple-mobile-web-app-title" content="Betadame - Congolese Checkers" />
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Alan+Sans:wght@300..900&family=Didact+Gothic&family=Fredoka:wght@300..700&family=Open+Sans:ital,wght@0,300..800;1,300..800&family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400;1,500;1,700&display=swap"
-        />
-      </Head>
-      <body className="min-h-screen bg-gradient-to-br from-congolese-blue to-congolese-green">
-        <AuthProvider>
-          <PushyProvider>
-            <ToastProvider>
-              {children}
-              <ToastContainer />
-              <Footer />
-            </ToastProvider>
-          </PushyProvider>
-        </AuthProvider>
-      </body>
-    </html>
-  )
+export default function ClientComponent({ children }: { children: React.ReactNode }) {
+  return <html lang="en"><RootLayout>{children}</RootLayout></html>
 }

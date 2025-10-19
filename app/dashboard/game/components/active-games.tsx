@@ -1,7 +1,8 @@
-// app/dashboard/game/components/active-games.tsx - UPDATED
+// app/dashboard/game/components/active-games.tsx
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import type { ReactNode } from 'react' // Add this import
 import { createClient } from '@/lib/supabase/client'
 import { 
   Play, 
@@ -16,7 +17,10 @@ import {
   TrendingUp,
   Shield,
   Sparkles,
-  RotateCcw
+  RotateCcw,
+  Filter,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react'
 import { TbPlayCardStar } from "react-icons/tb";
 import { PiCheckerboardFill } from "react-icons/pi";
@@ -45,6 +49,17 @@ interface Toast {
   type: 'success' | 'error' | 'warning'
 }
 
+interface GameTypeConfig {
+  color: string
+  bgColor: string
+  borderColor: string
+  textColor: string
+  icon: ReactNode // Changed from JSX.Element to ReactNode
+  name: string
+  description: string
+  badge: string | ReactNode // Changed from JSX.Element to ReactNode
+}
+
 export default function ActiveGames() {
   const [games, setGames] = useState<ActiveGame[]>([])
   const [filter, setFilter] = useState<'all' | 'waiting' | 'playing'>('all')
@@ -54,43 +69,43 @@ export default function ActiveGames() {
   const [currentPage, setCurrentPage] = useState(1)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [searchTerm, setSearchTerm] = useState('')
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [pageSize, setPageSize] = useState(9)
   const supabase = createClient()
 
-  const GAMES_PER_PAGE = 9
+  const pageSizes = [6, 9, 12, 18]
+
+  // Debounce search term
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm)
+      setCurrentPage(1) // Reset to first page when search changes
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [searchTerm])
 
   // Toast system
-  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'error') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'warning' = 'error') => {
     const id = Math.random().toString(36).substr(2, 9)
     setToasts(prev => [...prev, { id, message, type }])
     setTimeout(() => {
       setToasts(prev => prev.filter(toast => toast.id !== id))
     }, 5000)
-  }
+  }, [])
 
-  useEffect(() => {
-    loadCurrentUser()
-    loadActiveGames()
-    
-    const subscription = supabase
-      .channel('game_rooms')
-      .on('postgres_changes', 
-        { event: '*', schema: 'public', table: 'game_rooms' },
-        () => loadActiveGames()
-      )
-      .subscribe()
-
-    return () => {
-      subscription.unsubscribe()
+  // Load current user
+  const loadCurrentUser = useCallback(async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      setCurrentUserId(user?.id || null)
+    } catch (error) {
+      console.error('Error loading current user:', error)
     }
-  }, [filter, gameTypeFilter])
+  }, [supabase.auth])
 
-  const loadCurrentUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    setCurrentUserId(user?.id || null)
-  }
-
-  const loadActiveGames = async () => {
+  // Load active games
+  const loadActiveGames = useCallback(async () => {
     setLoading(true)
     try {
       let query = supabase
@@ -131,23 +146,40 @@ export default function ActiveGames() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [filter, gameTypeFilter, showToast, supabase])
 
-  // NEW: Check if current user is in a game
-  const isUserInGame = (game: ActiveGame): boolean => {
+  useEffect(() => {
+    loadCurrentUser()
+    loadActiveGames()
+    
+    const subscription = supabase
+      .channel('game_rooms')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'game_rooms' },
+        () => loadActiveGames()
+      )
+      .subscribe()
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [loadActiveGames, loadCurrentUser, supabase])
+
+  // Check if current user is in a game
+  const isUserInGame = useCallback((game: ActiveGame): boolean => {
     if (!currentUserId || !game.participants) return false
     return game.participants.some(participant => participant.user_id === currentUserId)
-  }
+  }, [currentUserId])
 
-  // NEW: Get user's role in game
-  const getUserRoleInGame = (game: ActiveGame): string => {
+  // Get user's role in game
+  const getUserRoleInGame = useCallback((game: ActiveGame): string => {
     if (!currentUserId || !game.participants) return ''
     const participant = game.participants.find(p => p.user_id === currentUserId)
     return participant ? `Joueur ${participant.player_number}` : ''
-  }
+  }, [currentUserId])
 
-  // NEW: Filter games to only show games the user is in OR waiting games with available spots
-  const getVisibleGames = (games: ActiveGame[]): ActiveGame[] => {
+  // Filter games to only show games the user is in OR waiting games with available spots
+  const getVisibleGames = useCallback((games: ActiveGame[]): ActiveGame[] => {
     return games.filter(game => {
       // Always show games the user is already in
       if (isUserInGame(game)) return true
@@ -158,9 +190,9 @@ export default function ActiveGames() {
       // Don't show playing games that the user isn't in
       return false
     })
-  }
+  }, [isUserInGame])
 
-  const getGameTypeConfig = (gameType?: string) => {
+  const getGameTypeConfig = useCallback((gameType?: string): GameTypeConfig => {
     switch (gameType) {
       case 'checkers_ranked':
         return {
@@ -207,22 +239,55 @@ export default function ActiveGames() {
           badge: '🎮 Jeu'
         }
     }
-  }
+  }, [])
 
-  const getGameTypeText = (gameType?: string) => {
+  const getGameTypeText = useCallback((gameType?: string) => {
     switch (gameType) {
       case 'checkers_ranked': return 'Dames Classées'
       case 'checkers': return 'Dames Rapides'
       case 'inter_demande': return 'Jeux d\'Inter'
       default: return 'Dames Rapides'
     }
-  }
+  }, [])
+
+  // Get relative time for game creation
+  const getTimeAgo = useCallback((dateString: string) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMins / 60)
+    const diffDays = Math.floor(diffHours / 24)
+    
+    if (diffMins < 1) return 'À l\'instant'
+    if (diffMins < 60) return `Il y a ${diffMins} min`
+    if (diffHours < 24) return `Il y a ${diffHours}h`
+    if (diffDays === 1) return 'Hier'
+    return `Il y a ${diffDays}j`
+  }, [])
 
   // Filter games based on search term AND visibility rules
-  const filteredGames = getVisibleGames(games).filter(game => 
-    game.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    getGameTypeText(game.game_type).toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredGames = useMemo(() => 
+    getVisibleGames(games).filter(game => 
+      game.name.toLowerCase().includes(debouncedSearchTerm.toLowerCase()) ||
+      getGameTypeText(game.game_type).toLowerCase().includes(debouncedSearchTerm.toLowerCase())
+    ), [games, debouncedSearchTerm, getVisibleGames, getGameTypeText]
   )
+
+  // Enhanced error handling for game joining
+  const handleJoinError = useCallback((error: any) => {
+    console.error('Join game error:', error)
+    
+    if (error.code === '23505') {
+      showToast('Vous êtes déjà dans cette partie', 'warning')
+    } else if (error.code === '40001') {
+      showToast('Conflit détecté, veuillez rafraîchir la page', 'warning')
+    } else if (error.message?.includes('balance')) {
+      showToast('Erreur de traitement du solde', 'error')
+    } else {
+      showToast('Erreur lors de la connexion à la partie', 'error')
+    }
+  }, [showToast])
 
   const joinGameFallback = async (gameId: string) => {
     try {
@@ -240,7 +305,7 @@ export default function ActiveGames() {
         return
       }
 
-      // Check if user is already in the game (shouldn't happen due to filtering, but safety check)
+      // Check if user is already in the game
       if (isUserInGame(game)) {
         const gamePath = game.game_type === 'inter_demande' 
           ? `/dashboard/game/inter/${gameId}`
@@ -296,7 +361,7 @@ export default function ActiveGames() {
         playerNumber = usedPlayerNumbers.length + 1;
       }
 
-      // Deduct balance
+      // Start transaction - deduct balance
       const { error: balanceError } = await supabase.rpc('decrement_balance', {
         user_id: user.id,
         amount: game.bet_amount
@@ -304,7 +369,7 @@ export default function ActiveGames() {
 
       if (balanceError) {
         console.error('Balance update error:', balanceError)
-        showToast('Erreur lors de la déduction du solde', 'error')
+        handleJoinError(balanceError)
         return
       }
 
@@ -321,11 +386,12 @@ export default function ActiveGames() {
 
       if (transactionError) {
         console.error('Transaction error:', transactionError)
+        // Rollback balance deduction
         await supabase.rpc('increment_balance', {
           user_id: user.id,
           amount: game.bet_amount
         })
-        showToast('Erreur lors de l\'enregistrement de la transaction', 'error')
+        handleJoinError(transactionError)
         return
       }
 
@@ -341,11 +407,16 @@ export default function ActiveGames() {
 
       if (joinError) {
         console.error('Join error:', joinError)
+        // Rollback balance and transaction
         await supabase.rpc('increment_balance', {
           user_id: user.id,
           amount: game.bet_amount
         })
-        showToast('Erreur lors de la connexion à la partie', 'error')
+        await supabase
+          .from('transactions')
+          .delete()
+          .eq('reference', `GAME-BET-${gameId}`)
+        handleJoinError(joinError)
         return
       }
 
@@ -377,30 +448,30 @@ export default function ActiveGames() {
 
     } catch (error) {
       console.error('Error joining game:', error)
-      showToast('Erreur lors de la connexion à la partie', 'error')
+      handleJoinError(error)
     } finally {
       setJoiningGame(null)
     }
   }
 
-  const getTotalPrize = (game: ActiveGame) => {
+  const getTotalPrize = useCallback((game: ActiveGame) => {
     return game.bet_amount * game.max_players
-  }
+  }, [])
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = useCallback((status: string) => {
     return status === 'playing' 
       ? 'bg-red-100 text-red-800 border-red-200' 
       : 'bg-amber-100 text-amber-800 border-amber-200'
-  }
+  }, [])
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = useCallback((status: string) => {
     return status === 'playing' 
       ? <Zap className="h-3 w-3 mr-1" />
       : <Clock className="h-3 w-3 mr-1" />
-  }
+  }, [])
 
-  // NEW: Get appropriate button text and action
-  const getGameActionButton = (game: ActiveGame) => {
+  // Get appropriate button text and action
+  const getGameActionButton = useCallback((game: ActiveGame) => {
     const userInGame = isUserInGame(game)
     const userRole = getUserRoleInGame(game)
 
@@ -431,13 +502,47 @@ export default function ActiveGames() {
       // Game is full or playing and user is not in it - don't show button (game should be filtered out)
       return null
     }
-  }
+  }, [isUserInGame, getUserRoleInGame, getGameTypeConfig, joiningGame])
 
   // Pagination
-  const totalPages = Math.ceil(filteredGames.length / GAMES_PER_PAGE)
+  const totalPages = Math.ceil(filteredGames.length / pageSize)
   const paginatedGames = filteredGames.slice(
-    (currentPage - 1) * GAMES_PER_PAGE,
-    currentPage * GAMES_PER_PAGE
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  )
+
+  // Get empty state message based on current filters
+  const getEmptyStateMessage = useCallback(() => {
+    if (searchTerm) return 'Aucune partie ne correspond à votre recherche'
+    if (filter === 'waiting') return 'Aucune partie en attente disponible'
+    if (filter === 'playing') return 'Aucune de vos parties en cours'
+    if (gameTypeFilter !== 'all') return `Aucune partie de ce type disponible`
+    return 'Aucune partie active'
+  }, [searchTerm, filter, gameTypeFilter])
+
+  // Skeleton loading component
+  const GameCardSkeleton = () => (
+    <div className="animate-pulse rounded-2xl border-2 border-gray-200 bg-white p-5">
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-gray-300 rounded-xl"></div>
+          <div>
+            <div className="h-5 bg-gray-300 rounded w-32 mb-2"></div>
+            <div className="flex space-x-2">
+              <div className="h-6 bg-gray-300 rounded-full w-20"></div>
+              <div className="h-6 bg-gray-300 rounded-full w-16"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="h-20 bg-gray-200 rounded-xl mb-4"></div>
+      <div className="space-y-3 mb-4">
+        <div className="h-4 bg-gray-200 rounded w-full"></div>
+        <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+        <div className="h-2 bg-gray-200 rounded-full w-full"></div>
+      </div>
+      <div className="h-12 bg-gray-300 rounded-xl"></div>
+    </div>
   )
 
   return (
@@ -447,7 +552,7 @@ export default function ActiveGames() {
         {toasts.map((toast) => (
           <div
             key={toast.id}
-            className={`p-4 rounded-xl shadow-lg border-l-4 backdrop-blur-sm ${
+            className={`p-4 rounded-xl shadow-lg border-l-4 backdrop-blur-sm max-w-sm ${
               toast.type === 'success' 
                 ? 'bg-green-50/95 border-green-500 text-green-800'
                 : toast.type === 'warning'
@@ -465,18 +570,6 @@ export default function ActiveGames() {
 
       <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl p-6 sm:p-8 border border-gray-100">
         {/* Header */}
-        <div className="text-center mb-8">
-          <div className="relative inline-block">
-            <div className="absolute -inset-4 bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl blur opacity-20"></div>
-            <Trophy className="h-16 w-16 text-blue-600 relative z-10 mx-auto mb-4" />
-          </div>
-          <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-blue-600 bg-clip-text text-transparent font-heading mb-3">
-            Mes Parties Actives
-          </h2>
-          <p className="text-gray-600 text-lg max-w-2xl mx-auto">
-            Reprenez vos parties en cours ou rejoignez de nouvelles aventures
-          </p>
-        </div>
 
         {/* Stats Bar */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
@@ -527,7 +620,8 @@ export default function ActiveGames() {
                   placeholder="Rechercher une partie..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 pr-4 py-3 w-full sm:w-64 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                  className="pl-10 pr-4 py-3 w-full sm:w-64 rounded-xl border border-gray-200 focus:ring-1  focus:border-blue-500 bg-white"
+                  aria-label="Rechercher une partie"
                 />
               </div>
 
@@ -538,8 +632,9 @@ export default function ActiveGames() {
                   className={`px-4 py-3 rounded-xl transition-all font-medium ${
                     filter === 'all' 
                       ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/25' 
-                      : 'bg-white text-gray-700 border border-gray-300 hover:border-blue-300'
+                      : 'bg-white text-gray-700 border border-gray-200 hover:border-blue-300'
                   }`}
+                  aria-label="Afficher toutes les parties"
                 >
                   Toutes
                 </button>
@@ -548,8 +643,9 @@ export default function ActiveGames() {
                   className={`px-4 py-3 rounded-xl transition-all font-medium ${
                     filter === 'waiting' 
                       ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25' 
-                      : 'bg-white text-gray-700 border border-gray-300 hover:border-amber-300'
+                      : 'bg-white text-gray-700 border border-gray-200 hover:border-amber-300'
                   }`}
+                  aria-label="Afficher les parties en attente"
                 >
                   En attente
                 </button>
@@ -558,32 +654,54 @@ export default function ActiveGames() {
                   className={`px-4 py-3 rounded-xl transition-all font-medium ${
                     filter === 'playing' 
                       ? 'bg-red-500 text-white shadow-lg shadow-red-500/25' 
-                      : 'bg-white text-gray-700 border border-gray-300 hover:border-red-300'
+                      : 'bg-white text-gray-700 border border-gray-200 hover:border-red-300'
                   }`}
+                  aria-label="Afficher les parties en cours"
                 >
                   En cours
                 </button>
               </div>
             </div>
 
-            {/* Game Type Filter */}
-            <select 
-              value={gameTypeFilter}
-              onChange={(e) => setGameTypeFilter(e.target.value)}
-              className="px-4 py-3 rounded-xl border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium"
-            >
-              <option value="all">🎮 Tous les jeux</option>
-              <option value="checkers">♟️ Jeux de Dames</option>
-              <option value="cards">🎴 Jeux d'Inter</option>
-            </select>
+            <div className="flex gap-3 w-full lg:w-auto">
+              {/* Game Type Filter */}
+              <select 
+                value={gameTypeFilter}
+                onChange={(e) => setGameTypeFilter(e.target.value)}
+                className="px-4 py-3 rounded-xl border border-gray-200 bg-white focus:ring-1  focus:border-blue-500 font-medium"
+                aria-label="Filtrer par type de jeu"
+              >
+                <option value="all">🎮 Tous les jeux</option>
+                <option value="checkers">♟️ Jeux de Dames</option>
+                <option value="cards">🎴 Jeux d'Inter</option>
+              </select>
+
+              {/* Page Size Selector */}
+              <select 
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value))
+                  setCurrentPage(1)
+                }}
+                className="px-4 py-3 rounded-xl border border-gray-200 bg-white focus:ring-1  focus:border-blue-500 font-medium"
+                aria-label="Nombre de parties par page"
+              >
+                {pageSizes.map(size => (
+                  <option key={size} value={size}>
+                    {size} / page
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
         {/* Games Grid */}
         {loading ? (
-          <div className="text-center py-16">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-            <p className="text-gray-500 text-lg">Chargement des parties...</p>
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6 mb-8">
+            {Array.from({ length: pageSize }).map((_, index) => (
+              <GameCardSkeleton key={index} />
+            ))}
           </div>
         ) : paginatedGames.length === 0 ? (
           <div className="text-center py-16">
@@ -591,12 +709,12 @@ export default function ActiveGames() {
               <Trophy className="h-10 w-10 text-gray-400" />
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">
-              {searchTerm ? 'Aucune partie trouvée' : 'Aucune partie active'}
+              {getEmptyStateMessage()}
             </h3>
             <p className="text-gray-500 mb-6 max-w-md mx-auto">
               {searchTerm 
-                ? 'Aucune partie ne correspond à votre recherche.' 
-                : 'Vous n\'avez pas de parties en cours et il n\'y a aucune partie disponible pour le moment.'
+                ? 'Essayez de modifier vos termes de recherche ou vos filtres.' 
+                : 'Revenez plus tard ou créez une nouvelle partie pour commencer à jouer.'
               }
             </p>
             <button 
@@ -623,32 +741,53 @@ export default function ActiveGames() {
                     }`}
                   >
                     {/* Game Header */}
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center space-x-3">
-                        <div className={`p-2 rounded-xl bg-gradient-to-r ${config.color} text-white shadow-lg`}>
-                          {config.icon}
-                        </div>
-                        <div>
-                          <h3 className="font-bold text-gray-900 text-lg group-hover:text-gray-800">
-                            {game.name}
-                          </h3>
-                          <div className="flex items-center space-x-2 mt-1">
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(game.status)} border`}>
-                              <span className="flex items-center">
-                                {getStatusIcon(game.status)}
-                                {game.status === 'playing' ? 'En cours' : 'En attente'}
-                              </span>
-                            </span>
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${config.textColor} bg-white/80 border ${config.borderColor}`}>
-                              {config.badge}
-                            </span>
-                            {userInGame && (
-                              <span className="px-2 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-200">
-                                {userRole}
-                              </span>
-                            )}
+                    <div className="space-y-3 mb-4">
+                      {/* Top Row - Icon, Name, and Time */}
+                      <div className="flex items-start justify-between gap-3">
+                        {/* Left - Icon and Name */}
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          {/* Game Icon */}
+                          <div className={`p-2.5 sm:p-3 rounded-xl bg-gradient-to-r ${config.color} text-white shadow-lg flex-shrink-0`}>
+                            <div className="w-5 h-5 sm:w-6 sm:h-6">
+                              {config.icon}
+                            </div>
+                          </div>
+                          
+                          {/* Game Name */}
+                          <div className="flex-1 min-w-0 pt-1">
+                            <h3 className="font-bold text-gray-900 text-base sm:text-lg leading-tight group-hover:text-gray-800 truncate">
+                              {game.name}
+                            </h3>
                           </div>
                         </div>
+                        
+                        {/* Right - Time Badge */}
+                        <div className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-lg whitespace-nowrap flex-shrink-0">
+                          {getTimeAgo(game.created_at)}
+                        </div>
+                      </div>
+                      
+                      {/* Bottom Row - Status Badges (Scrollable on mobile) */}
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1 scrollbar-hide">
+                        {/* Status Badge */}
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusColor(game.status)} border whitespace-nowrap flex-shrink-0`}>
+                          <span className="w-3 h-3 flex-shrink-0">
+                            {getStatusIcon(game.status)}
+                          </span>
+                          <span>{game.status === 'playing' ? 'En cours' : 'En attente'}</span>
+                        </span>
+                        
+                        {/* Game Type Badge */}
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${config.textColor} bg-white/80 border ${config.borderColor} whitespace-nowrap flex-shrink-0`}>
+                          {config.badge}
+                        </span>
+                        
+                        {/* User Role Badge (if applicable) */}
+                        {userInGame && (
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-200 whitespace-nowrap flex-shrink-0">
+                            {userRole}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -715,6 +854,7 @@ export default function ActiveGames() {
                           onClick={actionButton.onClick}
                           disabled={actionButton.disabled}
                           className={`w-full ${actionButton.className} text-white py-3 px-4 rounded-xl hover:shadow-lg transition-all font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center group`}
+                          aria-label={`${actionButton.text} pour la partie ${game.name}`}
                         >
                           {joiningGame === game.id ? (
                             <>
@@ -729,7 +869,6 @@ export default function ActiveGames() {
                           )}
                         </button>
                       ) : (
-                        // This shouldn't happen due to filtering, but just in case
                         <div className="w-full bg-gray-300 text-gray-500 py-3 px-4 rounded-xl text-center font-semibold">
                           Indisponible
                         </div>
@@ -742,24 +881,60 @@ export default function ActiveGames() {
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="flex justify-center items-center space-x-4">
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="px-6 py-3 rounded-xl bg-white border border-gray-300 text-gray-700 hover:border-blue-300 disabled:opacity-50 transition-all font-medium"
-                >
-                  ← Précédent
-                </button>
-                <span className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg font-semibold">
-                  Page {currentPage} sur {totalPages}
-                </span>
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className="px-6 py-3 rounded-xl bg-white border border-gray-300 text-gray-700 hover:border-blue-300 disabled:opacity-50 transition-all font-medium"
-                >
-                  Suivant →
-                </button>
+              <div className="flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0">
+                <div className="text-sm text-gray-600">
+                  Affichage de {(currentPage - 1) * pageSize + 1} à {Math.min(currentPage * pageSize, filteredGames.length)} sur {filteredGames.length} parties
+                </div>
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="px-4 py-2 rounded-xl bg-white border border-gray-200 text-gray-700 hover:border-blue-300 disabled:opacity-50 transition-all font-medium flex items-center"
+                    aria-label="Page précédente"
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-1" />
+                    Précédent
+                  </button>
+                  <div className="flex items-center space-x-2">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum: number
+                      if (totalPages <= 5) {
+                        pageNum = i + 1
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i
+                      } else {
+                        pageNum = currentPage - 2 + i
+                      }
+                      
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={`w-10 h-10 rounded-xl font-medium transition-all ${
+                            currentPage === pageNum
+                              ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/25'
+                              : 'bg-white border border-gray-200 text-gray-700 hover:border-blue-300'
+                          }`}
+                          aria-label={`Page ${pageNum}`}
+                          aria-current={currentPage === pageNum ? 'page' : undefined}
+                        >
+                          {pageNum}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    className="px-4 py-2 rounded-xl bg-white border border-gray-200 text-gray-700 hover:border-blue-300 disabled:opacity-50 transition-all font-medium flex items-center"
+                    aria-label="Page suivante"
+                  >
+                    Suivant
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </button>
+                </div>
               </div>
             )}
           </>
@@ -818,6 +993,18 @@ export default function ActiveGames() {
           </div>
         </div>
       </div>
+
+      {/* Add this to your global CSS for hiding scrollbar while keeping scroll functionality */}
+      <style jsx global>{`
+        .scrollbar-hide {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+        .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+        }
+      `}</style>
     </div>
+    
   )
 }

@@ -2,7 +2,7 @@
 'use client'
 
 import { useState } from 'react'
-import { DollarSign, TrendingUp, TrendingDown, Eye, EyeOff, ArrowUp, ArrowDown, Send } from 'lucide-react'
+import { DollarSign, TrendingUp, TrendingDown, Eye, EyeOff, ArrowUp, ArrowDown, Send, ChevronDown, ChevronUp } from 'lucide-react'
 import Link from 'next/link'
 
 interface Transaction {
@@ -21,6 +21,7 @@ interface BalanceCardProps {
 
 export default function BalanceCard({ balance, calculatedBalance, transactions }: BalanceCardProps) {
   const [showBalance, setShowBalance] = useState(true)
+  const [showTransactions, setShowTransactions] = useState(false)
 
   // Get recent transactions (last 5)
   const recentTransactions = transactions.slice(0, 5)
@@ -97,7 +98,7 @@ export default function BalanceCard({ balance, calculatedBalance, transactions }
         </p>
       </div>
 
-      {/* // Action Buttons - Minimalist Design */}
+      {/* Action Buttons - Minimalist Design */}
       <div className="grid grid-cols-3 gap-2 mb-6">
         <Link
           href="/dashboard/deposit"
@@ -158,33 +159,47 @@ export default function BalanceCard({ balance, calculatedBalance, transactions }
         </div>
       </div>
 
-      {/* Recent Transactions */}
-      <div>
-        <h4 className="font-medium text-gray-900 mb-4">Dernières transactions</h4>
-        <div className="space-y-3">
-          {recentTransactions.length === 0 ? (
-            <p className="text-gray-500 text-center py-4">Aucune transaction récente</p>
+      {/* Recent Transactions - Toggle Section */}
+      <div className=" pt-4">
+        <button
+          onClick={() => setShowTransactions(!showTransactions)}
+          className="flex items-center justify-between w-full p-2 hover:bg-gray-50 rounded-lg transition-colors"
+        >
+          <h4 className="font-medium text-gray-900">Dernières transactions</h4>
+          {showTransactions ? (
+            <ChevronUp className="h-4 w-4 text-gray-500" />
           ) : (
-            recentTransactions.map((transaction, index) => (
-              <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center space-x-3">
-                  {getTransactionIcon(transaction.type)}
-                  <div>
-                    <p className="font-medium text-sm text-gray-600">{getTransactionLabel(transaction.type)}</p>
-                    <p className="text-xs text-gray-500">{formatDate(transaction.created_at)}</p>
-                  </div>
-                </div>
-                <span className={`font-semibold ${getTransactionColor(transaction.type)}`}>
-                  {transaction.type === 'deposit' || transaction.type === 'game_win' ? '+' : '-'}
-                  {transaction.amount}$
-                </span>
-              </div>
-            ))
+            <ChevronDown className="h-4 w-4 text-gray-500" />
           )}
-        </div>
+        </button>
+
+        {/* Transactions Content */}
+        {showTransactions && (
+          <div className="mt-4 space-y-3">
+            {recentTransactions.length === 0 ? (
+              <p className="text-gray-500 text-center py-4">Aucune transaction récente</p>
+            ) : (
+              recentTransactions.map((transaction, index) => (
+                <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    {getTransactionIcon(transaction.type)}
+                    <div>
+                      <p className="font-medium text-sm text-gray-600">{getTransactionLabel(transaction.type)}</p>
+                      <p className="text-xs text-gray-500">{formatDate(transaction.created_at)}</p>
+                    </div>
+                  </div>
+                  <span className={`font-semibold ${getTransactionColor(transaction.type)}`}>
+                    {transaction.type === 'deposit' || transaction.type === 'game_win' ? '+' : '-'}
+                    {transaction.amount}$
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
         {/* View All Transactions Link */}
-        {recentTransactions.length > 0 && (
+        {showTransactions && recentTransactions.length > 0 && (
           <div className="mt-4 text-center">
             <Link
               href="/dashboard/transactions"

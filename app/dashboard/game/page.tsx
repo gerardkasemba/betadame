@@ -24,21 +24,21 @@ export default function GamePage() {
         </p>
       </div> */}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-2xl">
-          <TabsTrigger value="quick" className="flex items-center space-x-2 data-[state=active]:bg-white">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6" storageKey="game-page-tab">
+        <TabsList className="w-full">
+          <TabsTrigger value="quick" className="flex items-center space-x-2">
             <Sword className="h-4 w-4" />
             <span>Partie Rapide</span>
           </TabsTrigger>
-          {/* <TabsTrigger value="tournament" className="flex items-center space-x-2 data-[state=active]:bg-white">
+          {/* <TabsTrigger value="tournament" className="flex items-center space-x-2">
             <Trophy className="h-4 w-4" />
             <span>Tournoi</span>
           </TabsTrigger>
-          <TabsTrigger value="invite" className="flex items-center space-x-2 data-[state=active]:bg-white">
+          <TabsTrigger value="invite" className="flex items-center space-x-2">
             <Mail className="h-4 w-4" />
             <span>Invitation</span>
           </TabsTrigger> */}
-          <TabsTrigger value="active" className="flex items-center space-x-2 data-[state=active]:bg-white">
+          <TabsTrigger value="active" className="flex items-center space-x-2">
             <Users className="h-4 w-4" />
             <span>Parties Actives</span>
           </TabsTrigger>
