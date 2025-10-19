@@ -1517,20 +1517,11 @@ export default function GamePage() {
         const room = payload.new;
         const oldRoom = payload.old;
         
-        // Game started
-        if (room.status === 'playing' && oldRoom.status === 'waiting') {
+        // Someone joined - check if current_players increased
+        if (room.current_players > oldRoom.current_players) {
           return {
-            title: '🎯 La partie commence!',
-            message: 'C\'est parti!',
-            url: `/dashboard/game/p/${room.id}`,
-          };
-        }
-        
-        // Your turn
-        if (room.current_player === playerNumber && oldRoom.current_player !== playerNumber) {
-          return {
-            title: '⏰ C\'est votre tour!',
-            message: 'Faites votre mouvement',
+            title: '👥 Nouveau joueur!',
+            message: `Un joueur a rejoint la partie (${room.current_players}/${room.max_players})`,
             url: `/dashboard/game/p/${room.id}`,
           };
         }
@@ -1545,10 +1536,10 @@ export default function GamePage() {
           };
         }
         
+        // Return empty notification for other updates (won't be sent)
         return {
-          title: '📢 Mise à jour',
-          message: 'Changement dans la partie',
-          url: `/dashboard/game/p/${room.id}`,
+          title: '',
+          message: '',
         };
       }}
     >
