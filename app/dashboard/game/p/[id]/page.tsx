@@ -8,7 +8,7 @@ import { ProfessionalCheckersGame, type GameState, type Piece, type Position, ty
 import { createClient } from '@/lib/supabase/client';
 import { GameAnalysis } from '@/lib/games';
 import GameBoard from '../../components/GameBoard';
-import { SupabasePushyNotifier } from '@/components/SupabasePushyNotifier';
+// import { SupabasePushyNotifier } from '@/components/SupabasePushyNotifier';
 
 const PositionConverter = {
   toDb: (row: number, col: number): number => {
@@ -1509,40 +1509,6 @@ export default function GamePage() {
   }
 
   return (
-    <SupabasePushyNotifier
-      channel={gameChannelRef.current}
-      tableName="game_rooms"
-      userId={userProfile?.id}
-      onUpdate={(payload) => {
-        const room = payload.new;
-        const oldRoom = payload.old;
-        
-        // Someone joined - check if current_players increased
-        if (room.current_players > oldRoom.current_players) {
-          return {
-            title: '👥 Nouveau joueur!',
-            message: `Un joueur a rejoint la partie (${room.current_players}/${room.max_players})`,
-            url: `/dashboard/game/p/${room.id}`,
-          };
-        }
-        
-        // Game finished
-        if (room.status === 'finished' && oldRoom.status !== 'finished') {
-          const isWinner = room.winner_id === userProfile?.id;
-          return {
-            title: isWinner ? '🎉 Victoire!' : '😔 Défaite',
-            message: isWinner ? `Vous avez gagné ${totalBetAmount}$!` : 'Partie terminée',
-            url: `/dashboard/game/p/${room.id}`,
-          };
-        }
-        
-        // Return empty notification for other updates (won't be sent)
-        return {
-          title: '',
-          message: '',
-        };
-      }}
-    >
       <div className="">
         {toast && (
           <div
@@ -2152,6 +2118,5 @@ export default function GamePage() {
           </div>
         </div>
       </div>
-    </SupabasePushyNotifier>
   );
 }
