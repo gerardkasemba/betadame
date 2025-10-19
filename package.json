@@ -19,6 +19,7 @@
     "geist": "^1.5.1",
     "lucide-react": "^0.544.0",
     "next": "15.5.4",
+    "pushy": "^4.0.3",
     "qr-code-styling": "^1.9.2",
     "react": "19.1.0",
     "react-dom": "19.1.0",
