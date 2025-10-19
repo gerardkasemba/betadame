@@ -30,6 +30,7 @@ export const metadata: Metadata = {
       "Affronte d’autres joueurs au jeu de dames congolais pour gagner de l’argent réel. Joue et montre ton talent sur BetaDame.",
     images: ["/og-image.png"],
   },
+  themeColor: "#004aad",
   manifest: "/manifest.json",
 }
 

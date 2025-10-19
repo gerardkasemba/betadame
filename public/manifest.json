@@ -3,7 +3,7 @@
   "short_name": "BetaDame",
   "description": "Plateforme de jeux congolaise en temps réel. Jouez aux dames et défiez d'autres joueurs pour de l'argent.",
   "theme_color": "#001370",
-  "background_color": "#00A859",
+  "background_color": "#004aad",
   "display": "standalone",
   "start_url": "/",
   "icons": [
