@@ -15,7 +15,9 @@ import {
   Play,
   Filter,
   Zap,
-  AlertCircle
+  AlertCircle,
+  Star,
+  User
 } from 'lucide-react'
 import { TbPlayCardStar } from "react-icons/tb";
 import { PiCheckerboardFill } from "react-icons/pi";
@@ -31,13 +33,22 @@ interface Game {
   current_players?: number
   max_players?: number
   game_type?: string
+  created_by?: string
   profiles?: {
     username: string
+    state?: string
   }
   participants?: Array<{
     user_id: string
     player_number: number
   }>
+  // NEW: User relation flags
+  user_relations?: {
+    is_creator: boolean
+    is_participant: boolean
+    is_winner: boolean
+    player_number?: number
+  }
 }
 
 interface RecentGamesProps {
@@ -77,7 +88,7 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
     }
   }, [supabase.auth])
 
-  // Load games with participants - FIXED ERROR
+  // Load games with participants - UPDATED to include user_relations
   const loadGamesWithParticipants = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -88,10 +99,10 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
         .select(`
           *,
           participants:game_participants(user_id, player_number),
-          profiles:winner_id(username)
+          profiles:profiles!game_rooms_created_by_fkey(username, state)
         `)
         .order('created_at', { ascending: false })
-        .limit(20)
+        .limit(30)
 
       if (error) {
         console.error('Error loading games:', error)
@@ -99,7 +110,35 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
       }
 
       if (gamesData) {
-        setGames(gamesData)
+        // Add user_relations to each game
+        const gamesWithUserRelations = gamesData.map(game => {
+          const isUserCreator = game.created_by === user.id
+          const userParticipation = game.participants?.find((p: any) => p.user_id === user.id)
+          const isUserParticipant = !!userParticipation
+          const isUserWinner = game.winner_id === user.id
+          
+          return {
+            ...game,
+            user_relations: {
+              is_creator: isUserCreator,
+              is_participant: isUserParticipant,
+              is_winner: isUserWinner,
+              player_number: userParticipation?.player_number
+            }
+          }
+        })
+
+        // Sort with user's games first
+        const sortedGames = gamesWithUserRelations.sort((a, b) => {
+          const aIsUserGame = a.user_relations?.is_creator || a.user_relations?.is_participant
+          const bIsUserGame = b.user_relations?.is_creator || b.user_relations?.is_participant
+          
+          if (aIsUserGame && !bIsUserGame) return -1
+          if (!aIsUserGame && bIsUserGame) return 1
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        })
+
+        setGames(sortedGames)
       }
     } catch (error) {
       console.error('Error loading games:', error)
@@ -123,36 +162,47 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
     }
   }, [loadCurrentUser, loadGamesWithParticipants, supabase])
 
-  // Check if current user is in a game
+  // Check if current user is in a game - UPDATED to use user_relations
   const isUserInGame = useCallback((game: Game): boolean => {
-    if (!currentUserId || !game.participants) return false
-    return game.participants.some(participant => participant.user_id === currentUserId)
-  }, [currentUserId])
+    return game.user_relations?.is_participant || false
+  }, [])
 
-  // Get user's role in game
+  // Check if user is creator - NEW function
+  const isUserCreator = useCallback((game: Game): boolean => {
+    return game.user_relations?.is_creator || false
+  }, [])
+
+  // Check if user is winner - NEW function
+  const isUserWinner = useCallback((game: Game): boolean => {
+    return game.user_relations?.is_winner || false
+  }, [])
+
+  // Get user's role in game - UPDATED to use user_relations
   const getUserRoleInGame = useCallback((game: Game): string => {
-    if (!currentUserId || !game.participants) return ''
-    const participant = game.participants.find(p => p.user_id === currentUserId)
-    return participant ? `Joueur ${participant.player_number}` : ''
-  }, [currentUserId])
+    if (game.user_relations?.is_creator) return 'Créateur'
+    if (game.user_relations?.player_number) return `Joueur ${game.user_relations.player_number}`
+    return ''
+  }, [])
 
-  // Filter games based on status and user participation
+  // Filter games based on status and user participation - UPDATED logic
   const getVisibleGames = useCallback((games: Game[]): Game[] => {
     return games.filter(game => {
       // Apply status filter
       if (filter !== 'all' && game.status !== filter) return false
       
-      // For waiting and playing games, only show if user is in them or they're available to join
+      // For waiting and playing games, show:
+      // - All games user is in (creator or participant)
+      // - Available waiting games (not full)
       if (game.status === 'waiting' || game.status === 'playing') {
-        if (isUserInGame(game)) return true
+        if (isUserInGame(game) || isUserCreator(game)) return true
         if (game.status === 'waiting' && game.current_players && game.max_players && game.current_players < game.max_players) return true
         return false
       }
       
-      // For finished games, show all
+      // For finished games, show all but prioritize user's games
       return true
     })
-  }, [filter, isUserInGame])
+  }, [filter, isUserInGame, isUserCreator])
 
   const getStatusColor = useCallback((status: string) => {
     switch (status) {
@@ -204,6 +254,32 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
         return 'Rapides'
     }
   }, [])
+
+  // NEW: Get user badge for game
+  const getUserBadge = useCallback((game: Game) => {
+    if (game.user_relations?.is_creator) {
+      return {
+        text: 'Votre partie',
+        color: 'bg-purple-100 text-purple-800 border-purple-200',
+        icon: <Star className="h-3 w-3" />
+      }
+    }
+    if (game.user_relations?.is_winner) {
+      return {
+        text: 'Gagnant',
+        color: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+        icon: <Trophy className="h-3 w-3" />
+      }
+    }
+    if (game.user_relations?.is_participant) {
+      return {
+        text: getUserRoleInGame(game),
+        color: 'bg-blue-100 text-blue-800 border-blue-200',
+        icon: <User className="h-3 w-3" />
+      }
+    }
+    return null
+  }, [getUserRoleInGame])
 
   const detectGameTypeFromName = useCallback((gameName: string, gameType?: string): string => {
     if (gameType) return gameType;
@@ -391,10 +467,10 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
     }
   }
 
-  // Get appropriate button for game
+  // Get appropriate button for game - UPDATED to use user_relations
   const getGameActionButton = useCallback((game: Game) => {
     const userInGame = isUserInGame(game)
-    const userRole = getUserRoleInGame(game)
+    const userIsCreator = isUserCreator(game)
 
     if (userInGame && (game.status === 'playing' || game.status === 'waiting')) {
       // User is already in this active game - show Resume button
@@ -423,19 +499,20 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
     }
     
     return null
-  }, [isUserInGame, getUserRoleInGame, detectGameTypeFromName, joiningGame, joinGameFallback])
+  }, [isUserInGame, isUserCreator, detectGameTypeFromName, joiningGame, joinGameFallback])
 
-  // Filter games based on visibility rules (SEARCH REMOVED)
+  // Filter games based on visibility rules
   const filteredGames = useMemo(() => {
     return getVisibleGames(games)
   }, [games, getVisibleGames])
 
-  // Stats for the header
+  // Stats for the header - UPDATED to include user games count
   const gameStats = useMemo(() => ({
     total: games.length,
     waiting: games.filter(g => g.status === 'waiting' && g.current_players && g.max_players && g.current_players < g.max_players).length,
     playing: games.filter(g => g.status === 'playing' && isUserInGame(g)).length,
-    finished: games.filter(g => g.status === 'finished').length
+    finished: games.filter(g => g.status === 'finished').length,
+    myGames: games.filter(g => g.user_relations?.is_creator || g.user_relations?.is_participant).length
   }), [games, isUserInGame])
 
   return (
@@ -467,10 +544,14 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
           <h3 className="text-lg font-semibold text-gray-900 font-heading">
             {fr.dashboard.recentGames}
           </h3>
-          <div className="flex items-center gap-4 mt-2 text-xs text-gray-600">
+          <div className="flex items-center gap-4 mt-2 text-xs text-gray-600 flex-wrap">
             <span className="flex items-center gap-1">
               <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
               {gameStats.total} total
+            </span>
+            <span className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+              {gameStats.myGames} mes parties
             </span>
             <span className="flex items-center gap-1">
               <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
@@ -495,11 +576,11 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
         </Link>
       </div>
 
-      {/* Filter Section - SEARCH BAR REMOVED */}
+      {/* Filter Section */}
       <div className="bg-gray-50 rounded-xl p-3 mb-4 border border-gray-200">
         <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-          {/* Status Filter Only - No Search Bar */}
-          <div className="flex gap-1 w-full sm:w-auto justify-center sm:justify-start">
+          {/* Status Filter Only */}
+          <div className="flex gap-1 w-full sm:w-auto justify-center sm:justify-start flex-wrap">
             <button
               onClick={() => setFilter('all')}
               className={`px-3 py-2 rounded-lg transition-all text-xs font-medium flex-1 sm:flex-none ${
@@ -568,14 +649,14 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
             const gameTypeText = getGameTypeText(detectedGameType);
             const gameTypeIcon = getGameTypeIcon(detectedGameType);
             const actionButton = getGameActionButton(game);
+            const userBadge = getUserBadge(game);
             const userInGame = isUserInGame(game);
-            const userRole = getUserRoleInGame(game);
             
             return (
               <div 
                 key={game.id} 
                 className={`flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 rounded-lg border transition-colors gap-3 sm:gap-4 ${
-                  userInGame 
+                  userInGame || isUserCreator(game)
                     ? 'bg-green-50 border-green-200 hover:bg-green-100' 
                     : 'bg-gray-50 border-gray-200 hover:bg-gray-100'
                 }`}
@@ -592,14 +673,15 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
                       <p className="font-medium text-gray-900 text-sm sm:text-base truncate">
                         {game.name}
                       </p>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="flex items-center space-x-1 px-2 py-1 bg-white rounded-full text-xs text-gray-600 border border-gray-300 w-fit">
                           {gameTypeIcon}
                           <span className="hidden xs:inline">{gameTypeText}</span>
                         </span>
-                        {userInGame && (
-                          <span className="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
-                            {userRole}
+                        {userBadge && (
+                          <span className={`inline-flex items-center space-x-1 px-2 py-1 rounded-full text-xs font-medium border ${userBadge.color}`}>
+                            {userBadge.icon}
+                            <span>{userBadge.text}</span>
                           </span>
                         )}
                       </div>
@@ -657,7 +739,11 @@ export default function RecentGames({ initialGames }: RecentGamesProps) {
                       </button>
                     ) : game.status === 'finished' && game.winner_id && game.profiles ? (
                       <div className="text-xs text-gray-600 truncate max-w-[120px] text-right">
-                        Gagnant: {game.profiles.username}
+                        {isUserWinner(game) ? (
+                          <span className="text-green-600 font-medium">Vous avez gagné!</span>
+                        ) : (
+                          `Gagnant: ${game.profiles.username}`
+                        )}
                       </div>
                     ) : null}
                   </div>

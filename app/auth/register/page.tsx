@@ -68,8 +68,23 @@ const securityQuestions = [
   { value: 'birth_city', label: 'Ville de naissance' },
   { value: 'first_school', label: 'Nom de votre première école' },
   { value: 'favorite_teacher', label: 'Nom de votre professeur préféré' },
-  { value: 'childhood_nickname', label: 'Surnom d\'enfance' }
+  { value: 'childhood_nickname', label: 'Surnom d\'enfance' },
+  { value: 'favorite_food', label: 'Votre plat préféré' },
+  { value: 'first_car', label: 'Marque de votre première voiture' },
+  { value: 'best_friend_name', label: 'Nom de votre meilleur ami d\'enfance' },
+  { value: 'first_job', label: 'Nom de votre premier emploi' },
+  { value: 'father_birth_city', label: 'Ville de naissance de votre père' },
+  { value: 'favorite_vacation_place', label: 'Endroit de vacances préféré' },
+  { value: 'favorite_movie', label: 'Votre film préféré' },
+  { value: 'dream_job', label: 'Votre métier de rêve étant enfant' },
+  { value: 'first_computer', label: 'Nom ou marque de votre premier ordinateur' },
+  { value: 'first_love_name', label: 'Prénom de votre premier amour' },
+  { value: 'street_grew_up', label: 'Rue où vous avez grandi' },
+  { value: 'first_phone', label: 'Marque de votre premier téléphone' },
+  { value: 'favorite_color', label: 'Votre couleur préférée' },
+  { value: 'childhood_hero', label: 'Votre héros d\'enfance' }
 ];
+
 
 export default function RegisterPage() {
   const [error, setError] = useState('')
@@ -263,6 +278,7 @@ export default function RegisterPage() {
     setStep(step - 1)
   }
 
+  // In your handleSubmit function in app/auth/register/page.tsx
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     e.stopPropagation()
@@ -319,12 +335,10 @@ export default function RegisterPage() {
       if (result?.error) {
         console.error('Registration error response:', result.error)
         setError(result.error)
-      } else if (result?.success) {
-        console.log('Registration successful - redirecting to verification page')
-        window.location.href = '/auth/verify-email'
       } else {
-        console.log('Registration completed successfully')
-        window.location.href = '/auth/verify-email'
+        console.log('Registration successful - redirecting to login with success message')
+        // Redirect to login page with success parameter
+        window.location.href = '/auth/login?registered=true'
       }
 
     } catch (err: any) {

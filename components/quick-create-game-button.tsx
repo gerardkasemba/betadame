@@ -352,9 +352,10 @@ export default function QuickCreateGameButton() {
       <div className="fixed bottom-6 right-6 z-50">
         <button
           onClick={() => setIsExpanded(true)}
-          className="bg-gradient-to-r from-primary to-secondary text-white p-4 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110 flex items-center justify-center"
+          className="bg-blue-800 text-white hover:pointer p-4 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110 flex items-center justify-center"
           title="Créer une partie rapide"
         >
+          <Plus className="h-6 w-6" />
           Créer une Partie
         </button>
       </div>

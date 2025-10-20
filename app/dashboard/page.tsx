@@ -12,6 +12,7 @@ import { Gamepad2, TrendingUp, Users, Trophy, DollarSign, Clock, Award, Star, Re
 import { fr } from '@/lib/i18n'
 import { DashboardData } from '@/types/game'
 import { AlertCircle } from 'lucide-react'
+import UserGameProfile from '@/components/UserGameProfile'
 
 // Throttle function to prevent excessive updates
 function throttle<T extends (...args: any[]) => any>(
@@ -183,44 +184,79 @@ export default function DashboardPage() {
       // Calculate player level
       const playerLevel = Math.floor((totalGames || 0) / 5) + Math.floor((totalWins || 0) / 3) + 1
 
-      // Fetch recent games data with participants for the enhanced RecentGames component
-      const userGameIds = userGameParticipations.map(p => p.game_room_id)
-      
-      // Enhanced query to include participants data
-      const { data: recentGamesData } = userGameIds.length > 0 ? await supabase
-        .from('game_rooms')
-        .select(`
-          *,
-          participants:game_participants(user_id, player_number)
-        `)
-        .in('id', userGameIds)
-        .order('created_at', { ascending: false }) : { data: [] }
+// Fetch ALL games data with participants
+const { data: allGamesData, error: gamesError } = await supabase
+  .from('game_rooms')
+  .select(`
+    *,
+    participants:game_participants(user_id, player_number)
+  `)
+  .order('created_at', { ascending: false })
+  .limit(50)
 
-      // Fetch creator profiles
-      const creatorIds = recentGamesData?.map(game => game.created_by).filter(Boolean) || []
-      const { data: creatorProfiles } = creatorIds.length > 0 ? await supabase
-        .from('profiles')
-        .select('id, username, state')
-        .in('id', creatorIds) : { data: [] }
+if (gamesError) {
+  console.error('Error fetching games:', gamesError)
+}
 
-      // Format recent games with participants data
-      const recentGames = recentGamesData?.map(game => {
-        const creator = creatorProfiles?.find(profile => profile.id === game.created_by)
-        
-        return {
-          id: game.id,
-          name: game.name,
-          bet_amount: game.bet_amount,
-          status: game.status,
-          winner_id: game.winner_id,
-          current_players: game.current_players,
-          max_players: game.max_players,
-          game_type: game.game_type, // Added for game type detection
-          created_at: game.created_at,
-          profiles: creator ? { username: creator.username } : undefined,
-          participants: game.participants // Added for participant checking
-        }
-      }) || []
+console.log('📊 Raw games data:', allGamesData?.length, 'games found')
+
+// Fetch creator profiles separately
+const creatorIds = allGamesData?.map(game => game.created_by).filter(Boolean) || []
+const { data: creatorProfiles, error: profilesError } = creatorIds.length > 0 ? await supabase
+  .from('profiles')
+  .select('id, username, state')
+  .in('id', creatorIds) : { data: [] }
+
+if (profilesError) {
+  console.error('Error fetching creator profiles:', profilesError)
+}
+
+console.log('👤 Creator profiles found:', creatorProfiles?.length)
+
+// Format games with user relations
+const recentGames = allGamesData?.map(game => {
+  const creator = creatorProfiles?.find(profile => profile.id === game.created_by)
+  const isUserCreator = game.created_by === user.id
+  const userParticipation = game.participants?.find((p: any) => p.user_id === user.id)
+  const isUserParticipant = !!userParticipation
+  const isUserWinner = game.winner_id === user.id
+  
+  console.log(`🎮 Game ${game.id}:`, {
+    name: game.name,
+    status: game.status,
+    created_by: game.created_by,
+    user_is_creator: isUserCreator,
+    user_is_participant: isUserParticipant,
+    current_players: game.current_players,
+    max_players: game.max_players
+  })
+  
+  return {
+    id: game.id,
+    name: game.name,
+    bet_amount: game.bet_amount,
+    status: game.status,
+    winner_id: game.winner_id,
+    current_players: game.current_players,
+    max_players: game.max_players,
+    game_type: game.game_type,
+    created_at: game.created_at,
+    created_by: game.created_by,
+    profiles: creator ? { 
+      username: creator.username,
+      state: creator.state 
+    } : { username: 'Unknown', state: 'Unknown' }, // Fallback
+    participants: game.participants || [],
+    user_relations: {
+      is_creator: isUserCreator,
+      is_participant: isUserParticipant,
+      is_winner: isUserWinner,
+      player_number: userParticipation?.player_number
+    }
+  }
+}) || []
+
+console.log('✅ Formatted games:', recentGames.length)
 
       // Calculate balance from transactions
       const calculatedBalance = transactions.reduce((total, transaction) => {
@@ -523,160 +559,160 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       {/* Welcome Section */}
-<div className="bg-gradient-to-r from-primary to-secondary rounded-2xl p-8 text-white">
-  <div className="space-y-4 sm:space-y-0 sm:flex sm:items-start sm:justify-between">
-    {/* Left Section - User Info */}
-    <div className="flex-1 space-y-3">
-      {/* Top Row - Welcome & Actions */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold font-heading leading-tight">
-            {fr.common.welcome},
-          </h1>
-          <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold font-heading leading-tight truncate">
-            {profile?.username || 'Joueur'}!
-          </h2>
-        </div>
-        
-        {/* Action Buttons - Desktop */}
-        <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
-          <button
-            onClick={refreshData}
-            disabled={refreshing}
-            className="p-2.5 bg-white/20 rounded-xl hover:bg-white/30 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed backdrop-blur-sm"
-            title="Actualiser les données"
-            aria-label="Actualiser"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-          </button>
-          <ConnectionStatus />
-        </div>
-      </div>
+      <div className="bg-gradient-to-r from-primary to-secondary rounded-2xl p-8 text-white">
+        <div className="space-y-4 sm:space-y-0 sm:flex sm:items-start sm:justify-between">
+          {/* Left Section - User Info */}
+          <div className="flex-1 space-y-3">
+            {/* Top Row - Welcome & Actions */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold font-heading leading-tight">
+                  {fr.common.welcome},
+                </h1>
+                <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold font-heading leading-tight truncate">
+                  {profile?.username || 'Joueur'}!
+                </h2>
+              </div>
+              
+              {/* Action Buttons - Desktop */}
+              <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={refreshData}
+                  disabled={refreshing}
+                  className="p-2.5 bg-white/20 rounded-xl hover:bg-white/30 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed backdrop-blur-sm"
+                  title="Actualiser les données"
+                  aria-label="Actualiser"
+                >
+                  <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                </button>
+                <ConnectionStatus />
+              </div>
+            </div>
 
-      {/* User Stats & Info */}
-      <div className="flex flex-wrap items-center gap-2 text-sm sm:text-base">
-        {/* Level Badge */}
-        <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full border border-white/30">
-          <Star className="h-4 w-4 text-yellow-300" />
-          <span className="font-semibold">Niveau {stats.playerLevel}</span>
-        </div>
-        
-        {/* Location Badge */}
-        {profile?.state && (
-          <div className="inline-flex items-center px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full border border-white/30">
-            <span className="font-medium">{profile.state}</span>
-          </div>
-        )}
-        
-        {/* Member Since - Hidden on small mobile */}
-        <div className="hidden xs:inline-flex items-center px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full border border-white/30">
-          <span className="text-blue-100">
-            Membre depuis {new Date(profile?.created_at || Date.now()).toLocaleDateString('fr-FR', { 
-              month: 'short', 
-              year: 'numeric' 
-            })}
-          </span>
-        </div>
-      </div>
+            {/* User Stats & Info */}
+            <div className="flex flex-wrap items-center gap-2 text-sm sm:text-base">
+              {/* Level Badge */}
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full border border-white/30">
+                <Star className="h-4 w-4 text-yellow-300" />
+                <span className="font-semibold">Niveau {stats.playerLevel}</span>
+              </div>
+              
+              {/* Location Badge */}
+              {profile?.state && (
+                <div className="inline-flex items-center px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full border border-white/30">
+                  <span className="font-medium">{profile.state}</span>
+                </div>
+              )}
+              
+              {/* Member Since - Hidden on small mobile */}
+              <div className="hidden xs:inline-flex items-center px-3 py-1.5 bg-white/20 backdrop-blur-sm rounded-full border border-white/30">
+                <span className="text-blue-100">
+                  Membre depuis {new Date(profile?.created_at || Date.now()).toLocaleDateString('fr-FR', { 
+                    month: 'short', 
+                    year: 'numeric' 
+                  })}
+                </span>
+              </div>
+            </div>
 
-      {/* Action Buttons - Mobile Only */}
-      <div className="flex sm:hidden items-center gap-2">
-        <button
-          onClick={refreshData}
-          disabled={refreshing}
-          className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-white/20 rounded-xl hover:bg-white/30 active:scale-95 transition-all disabled:opacity-50 backdrop-blur-sm border border-white/30"
-        >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-          <span className="text-sm font-medium">
-            {refreshing ? 'Actualisation...' : 'Actualiser'}
-          </span>
-        </button>
-        <div className="flex-shrink-0">
-          <ConnectionStatus />
-        </div>
-      </div>
+            {/* Action Buttons - Mobile Only */}
+            <div className="flex sm:hidden items-center gap-2">
+              <button
+                onClick={refreshData}
+                disabled={refreshing}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-white/20 rounded-xl hover:bg-white/30 active:scale-95 transition-all disabled:opacity-50 backdrop-blur-sm border border-white/30"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                <span className="text-sm font-medium">
+                  {refreshing ? 'Actualisation...' : 'Actualiser'}
+                </span>
+              </button>
+              <div className="flex-shrink-0">
+                <ConnectionStatus />
+              </div>
+            </div>
 
-      {/* Status Messages */}
-      {connectionError && (
-        <div className="flex items-start gap-2 p-3 bg-red-500/20 backdrop-blur-sm border border-red-300/30 rounded-xl">
-          <AlertCircle className="h-4 w-4 text-red-200 flex-shrink-0 mt-0.5" />
-          <p className="text-red-100 text-sm flex-1">{connectionError}</p>
-        </div>
-      )}
-      
-      {refreshing && !connectionError && (
-        <div className="flex items-center gap-2 p-3 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl">
-          <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin flex-shrink-0" />
-          <p className="text-blue-100 text-sm">Actualisation en cours...</p>
-        </div>
-      )}
-    </div>
+            {/* Status Messages */}
+            {connectionError && (
+              <div className="flex items-start gap-2 p-3 bg-red-500/20 backdrop-blur-sm border border-red-300/30 rounded-xl">
+                <AlertCircle className="h-4 w-4 text-red-200 flex-shrink-0 mt-0.5" />
+                <p className="text-red-100 text-sm flex-1">{connectionError}</p>
+              </div>
+            )}
+            
+            {refreshing && !connectionError && (
+              <div className="flex items-center gap-2 p-3 bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl">
+                <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin flex-shrink-0" />
+                <p className="text-blue-100 text-sm">Actualisation en cours...</p>
+              </div>
+            )}
+          </div>
 
-    {/* Right Section - Level Display (Desktop & Tablet) */}
-    <div className="hidden sm:flex flex-col items-end justify-center text-right flex-shrink-0 ml-6">
-      <div className="flex items-center gap-3 mb-2">
-        <div className="relative">
-          {/* Glowing effect */}
-          <div className="absolute inset-0 bg-yellow-300 rounded-full blur-xl opacity-50 animate-pulse" />
-          <div className="relative flex items-center justify-center w-16 h-16 lg:w-20 lg:h-20 bg-white/20 backdrop-blur-sm rounded-2xl border-2 border-yellow-300/50">
-            <Star className="h-8 w-8 lg:h-10 lg:w-10 text-yellow-300 fill-yellow-300" />
+          {/* Right Section - Level Display (Desktop & Tablet) */}
+          <div className="hidden sm:flex flex-col items-end justify-center text-right flex-shrink-0 ml-6">
+            <div className="flex items-center gap-3 mb-2">
+              <div className="relative">
+                {/* Glowing effect */}
+                <div className="absolute inset-0 bg-yellow-300 rounded-full blur-xl opacity-50 animate-pulse" />
+                <div className="relative flex items-center justify-center w-16 h-16 lg:w-20 lg:h-20 bg-white/20 backdrop-blur-sm rounded-2xl border-2 border-yellow-300/50">
+                  <Star className="h-8 w-8 lg:h-10 lg:w-10 text-yellow-300 fill-yellow-300" />
+                </div>
+              </div>
+              <div>
+                <div className="text-4xl lg:text-5xl font-bold leading-none">
+                  {stats.playerLevel}
+                </div>
+                <p className="text-sm text-blue-200 mt-1">Votre niveau</p>
+              </div>
+            </div>
+            
+            {/* Progress to next level (optional) */}
+            <div className="w-full mt-2">
+              <div className="h-2 bg-white/20 rounded-full overflow-hidden backdrop-blur-sm">
+                <div 
+                  className="h-full bg-gradient-to-r from-yellow-300 to-yellow-400 rounded-full transition-all duration-500"
+                  style={{ width: `${((stats.totalGames % 5) / 5) * 100}%` }}
+                />
+              </div>
+              <p className="text-xs text-blue-200 mt-1 text-right">
+                {5 - (stats.totalGames % 5)} parties jusqu'au niveau {stats.playerLevel + 1}
+              </p>
+            </div>
           </div>
-        </div>
-        <div>
-          <div className="text-4xl lg:text-5xl font-bold leading-none">
-            {stats.playerLevel}
-          </div>
-          <p className="text-sm text-blue-200 mt-1">Votre niveau</p>
-        </div>
-      </div>
-      
-      {/* Progress to next level (optional) */}
-      <div className="w-full mt-2">
-        <div className="h-2 bg-white/20 rounded-full overflow-hidden backdrop-blur-sm">
-          <div 
-            className="h-full bg-gradient-to-r from-yellow-300 to-yellow-400 rounded-full transition-all duration-500"
-            style={{ width: `${((stats.totalGames % 5) / 5) * 100}%` }}
-          />
-        </div>
-        <p className="text-xs text-blue-200 mt-1 text-right">
-          {5 - (stats.totalGames % 5)} parties jusqu'au niveau {stats.playerLevel + 1}
-        </p>
-      </div>
-    </div>
 
-    {/* Mobile Level Card */}
-    <div className="flex sm:hidden items-center justify-between p-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20">
-      <div className="flex items-center gap-3">
-        <div className="relative">
-          <div className="absolute inset-0 bg-yellow-300 rounded-full blur-lg opacity-50" />
-          <div className="relative flex items-center justify-center w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl border-2 border-yellow-300/50">
-            <Star className="h-6 w-6 text-yellow-300 fill-yellow-300" />
-          </div>
-        </div>
-        <div>
-          <p className="text-sm text-blue-200">Votre niveau</p>
-          <div className="text-3xl font-bold leading-none">
-            {stats.playerLevel}
+          {/* Mobile Level Card */}
+          <div className="flex sm:hidden items-center justify-between p-4 bg-white/10 backdrop-blur-sm rounded-xl border border-white/20">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="absolute inset-0 bg-yellow-300 rounded-full blur-lg opacity-50" />
+                <div className="relative flex items-center justify-center w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl border-2 border-yellow-300/50">
+                  <Star className="h-6 w-6 text-yellow-300 fill-yellow-300" />
+                </div>
+              </div>
+              <div>
+                <p className="text-sm text-blue-200">Votre niveau</p>
+                <div className="text-3xl font-bold leading-none">
+                  {stats.playerLevel}
+                </div>
+              </div>
+            </div>
+            
+            {/* Mini progress */}
+            <div className="text-right">
+              <p className="text-xs text-blue-200 mb-1">Prochain niveau</p>
+              <div className="w-20 h-2 bg-white/20 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-yellow-300 to-yellow-400 rounded-full"
+                  style={{ width: `${((stats.totalGames % 5) / 5) * 100}%` }}
+                />
+              </div>
+              <p className="text-xs text-blue-200 mt-1">
+                {5 - (stats.totalGames % 5)} parties
+              </p>
+            </div>
           </div>
         </div>
       </div>
-      
-      {/* Mini progress */}
-      <div className="text-right">
-        <p className="text-xs text-blue-200 mb-1">Prochain niveau</p>
-        <div className="w-20 h-2 bg-white/20 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-gradient-to-r from-yellow-300 to-yellow-400 rounded-full"
-            style={{ width: `${((stats.totalGames % 5) / 5) * 100}%` }}
-          />
-        </div>
-        <p className="text-xs text-blue-200 mt-1">
-          {5 - (stats.totalGames % 5)} parties
-        </p>
-      </div>
-    </div>
-  </div>
-</div>
 
 
       {/* Quick Stats */}
@@ -734,7 +770,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left Column */}
         <div className="lg:col-span-2 space-y-8">
-          <RecentGames initialGames={recentGames} />
+          <UserGameProfile />
         </div>
 
         {/* Right Column */}
