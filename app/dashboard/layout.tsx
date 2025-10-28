@@ -5,6 +5,7 @@ import DashboardNav from '@/components/dashboard-nav'
 import ClientDashboard from './client-dashboard'
 import { createClient } from '@/lib/supabase/server'
 import QuickCreateGameButton from '@/components/quick-create-game-button'
+import LiveGamesTicker from '@/components/LiveGamesTicker'
 
 export default async function DashboardLayout({
   children,
@@ -23,12 +24,15 @@ export default async function DashboardLayout({
 
   return (
     <ClientDashboard>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-">
         <DashboardNav />
-        <main className="py-8">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="sticky top-16 z-45 pb-4">
+          <LiveGamesTicker showControls={true} />
+        </div>
+        <main className="relative pb-8">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
             {children}
-            <QuickCreateGameButton />
+            {/* <QuickCreateGameButton /> */}
           </div>
         </main>
       </div>

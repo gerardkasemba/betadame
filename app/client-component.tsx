@@ -9,6 +9,7 @@ import { timeoutService } from '@/lib/background-services'
 import { useEffect } from 'react'
 import PWAInstallPrompt from '@/components/pwa-install-prompt'
 
+
 export default function RootLayout({
   children,
 }: {
@@ -59,7 +60,7 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" />
         <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;700&display=swap" rel="stylesheet" />
     </head>
-        <body className="min-h-screen bg-gradient-to-br from-congolese-blue to-congolese-green">
+        <body className="min-h-screen">
             <AuthProvider>
                 <ToastProvider>
                 {children}

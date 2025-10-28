@@ -1,6 +1,7 @@
 import type { Metadata } from "next"
 import RootLayout from "./client-component"
 
+
 export const metadata: Metadata = {
   title: "BetaDame — Joue, Défie et Gagne",
   description:
@@ -35,5 +36,6 @@ export const metadata: Metadata = {
 }
 
 export default function ClientComponent({ children }: { children: React.ReactNode }) {
+  
   return <html lang="en"><RootLayout>{children}</RootLayout></html>
 }

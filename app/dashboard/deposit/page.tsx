@@ -129,32 +129,33 @@ export default function DepositPage() {
       'MTN Money': {
         code: '*555#',
         color: 'bg-yellow-600 hover:bg-yellow-700',
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
+        href: `sms:*555#?body=${encodeURIComponent(smsBody)}`
       },
       'Airtel Money': {
         code: '*501#', 
         color: 'bg-red-600 hover:bg-red-700',
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
+        href: `sms:*501#?body=${encodeURIComponent(smsBody)}`
       },
       'Orange Money': {
         code: '*144#',
         color: 'bg-orange-600 hover:bg-orange-700',
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
+        href: `sms:*144#?body=${encodeURIComponent(smsBody)}`
       },
       'M-Pesa': {
         code: '*122#',
         color: 'bg-green-600 hover:bg-green-700', 
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
+        href: `sms:*122#?body=${encodeURIComponent(smsBody)}`
       },
       'Africell Money': {
         code: '*111#',
         color: 'bg-purple-600 hover:bg-purple-700',
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
+        href: `sms:*111#?body=${encodeURIComponent(smsBody)}`
       },
       'Illicocash': {
         code: '*404#',
         color: 'bg-blue-600 hover:bg-blue-700',
-        href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
+        href: `sms:*404#?body=${encodeURIComponent(smsBody)}`
+        // href: `sms:${accountNumber}?body=${encodeURIComponent(smsBody)}`
       }
     }
 

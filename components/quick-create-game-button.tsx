@@ -1,7 +1,6 @@
-// components/quick-create-game-button.tsx
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -10,6 +9,7 @@ import { PiCheckerboardFill } from "react-icons/pi";
 import { TbPlayCardStar } from "react-icons/tb";
 import { fr } from '@/lib/i18n'
 import { InterCardGame } from '@/lib/inter-card'
+import { notificationService, NotificationType } from '@/lib/notifications'
 
 interface QuickGameForm {
   betAmount: string
@@ -25,6 +25,11 @@ interface ValidationError {
 
 type GameSelection = 'dames' | 'inter' | null
 
+interface Position {
+  x: number
+  y: number
+}
+
 export default function QuickCreateGameButton() {
   const [isExpanded, setIsExpanded] = useState(false)
   const [selectedGame, setSelectedGame] = useState<GameSelection>(null)
@@ -39,9 +44,15 @@ export default function QuickCreateGameButton() {
   const [customAmountActive, setCustomAmountActive] = useState(false)
   const [isVisible, setIsVisible] = useState(true)
   
+  // Drag state
+  const [isDragging, setIsDragging] = useState(false)
+  const [position, setPosition] = useState<Position>({ x: 20, y: 20 })
+  const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 })
+  
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   // Hide component on specific routes
   useEffect(() => {
@@ -53,6 +64,89 @@ export default function QuickCreateGameButton() {
     const shouldHide = hiddenRoutes.some(route => pathname?.startsWith(route))
     setIsVisible(!shouldHide)
   }, [pathname])
+
+  // Handle mouse down for drag start
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (isExpanded) return // Don't drag when expanded
+    
+    setIsDragging(true)
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      })
+    }
+    
+    e.preventDefault()
+  }
+
+  // Handle touch start for mobile drag
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (isExpanded) return // Don't drag when expanded
+    
+    setIsDragging(true)
+    if (buttonRef.current && e.touches[0]) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setDragOffset({
+        x: e.touches[0].clientX - rect.left,
+        y: e.touches[0].clientY - rect.top
+      })
+    }
+    
+    e.preventDefault()
+  }
+
+  // Handle mouse move for dragging
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return
+      
+      const newX = e.clientX - dragOffset.x
+      const newY = e.clientY - dragOffset.y
+      
+      // Constrain to viewport boundaries
+      const constrainedX = Math.max(0, Math.min(window.innerWidth - 100, newX))
+      const constrainedY = Math.max(0, Math.min(window.innerHeight - 60, newY))
+      
+      setPosition({ x: constrainedX, y: constrainedY })
+    }
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!isDragging || !e.touches[0]) return
+      
+      const newX = e.touches[0].clientX - dragOffset.x
+      const newY = e.touches[0].clientY - dragOffset.y
+      
+      // Constrain to viewport boundaries
+      const constrainedX = Math.max(0, Math.min(window.innerWidth - 100, newX))
+      const constrainedY = Math.max(0, Math.min(window.innerHeight - 60, newY))
+      
+      setPosition({ x: constrainedX, y: constrainedY })
+    }
+
+    const handleMouseUp = () => {
+      setIsDragging(false)
+    }
+
+    const handleTouchEnd = () => {
+      setIsDragging(false)
+    }
+
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      document.addEventListener('touchmove', handleTouchMove)
+      document.addEventListener('touchend', handleTouchEnd)
+      
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+        document.removeEventListener('touchmove', handleTouchMove)
+        document.removeEventListener('touchend', handleTouchEnd)
+      }
+    }
+  }, [isDragging, dragOffset])
 
   const validateForm = (): boolean => {
     setValidationError(null)
@@ -100,6 +194,47 @@ export default function QuickCreateGameButton() {
     setValidationError(null)
   }
 
+  // Function to send notification to users about new game
+  const sendNewGameNotification = async (userPhone: string, gameData: any) => {
+    try {
+      await notificationService.sendNotification({
+        phoneNumber: userPhone,
+        type: NotificationType.NEW_GAME_CREATED,
+        data: {
+          gameTitle: gameData.gameTitle,
+          betAmount: gameData.betAmount,
+          currency: gameData.currency,
+          region: gameData.region
+        }
+      });
+      console.log('New game notification sent successfully');
+    } catch (error) {
+      console.error('Failed to send new game notification:', error);
+      // Don't throw error here - notification failure shouldn't block game creation
+    }
+  }
+
+  // Function to get user's phone number from profile
+  const getUserPhoneNumber = async (userId: string): Promise<string | null> => {
+    try {
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('phone_number')
+        .eq('id', userId)
+        .single();
+
+      if (error) {
+        console.error('Error fetching user phone:', error);
+        return null;
+      }
+
+      return profile?.phone_number || null;
+    } catch (error) {
+      console.error('Error in getUserPhoneNumber:', error);
+      return null;
+    }
+  }
+
   const handleCreateGame = async () => {
     if (!validateForm()) return
 
@@ -117,7 +252,7 @@ export default function QuickCreateGameButton() {
       // Vérifier le solde utilisateur
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('balance, games_played')
+        .select('balance, games_played, phone_number')
         .eq('id', user.id)
         .single()
 
@@ -143,16 +278,19 @@ export default function QuickCreateGameButton() {
       // Déterminer le type de jeu
       let gameType = 'checkers';
       let gameName = '';
+      let displayGameType = '';
       
       switch (form.gameType) {
         case 'inter':
           gameType = 'inter_demande';
           gameName = `Jeux d'Inter - ${betAmount.toFixed(2)}$`;
+          displayGameType = "Jeux d'Inter";
           break;
         case 'dames':
         default:
           gameType = 'checkers';
           gameName = `Partie de Dames - ${betAmount.toFixed(2)}$`;
+          displayGameType = 'Dames Classiques';
       }
 
       // Créer la salle de jeu
@@ -232,6 +370,18 @@ export default function QuickCreateGameButton() {
 
       if (transactionError) {
         console.error('Transaction error:', transactionError)
+      }
+
+      // Send notification to the user who created the game
+      if (profile.phone_number) {
+        await sendNewGameNotification(profile.phone_number, {
+          gameTitle: displayGameType,
+          betAmount: betAmount.toFixed(2),
+          currency: 'USD',
+          region: form.region || 'Toutes les régions'
+        });
+      } else {
+        console.warn('User phone number not found, skipping notification');
       }
 
       // Reset form and close
@@ -346,23 +496,34 @@ export default function QuickCreateGameButton() {
 
   if (!isVisible) return null
 
-  // Main floating button
+  // Main floating button with drag functionality
   if (!isExpanded) {
     return (
-      <div className="fixed bottom-6 right-6 z-50">
-        <button
-          onClick={() => setIsExpanded(true)}
-          className="bg-blue-800 text-white hover:pointer p-4 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-110 flex items-center justify-center"
-          title="Créer une partie rapide"
-        >
-          <Plus className="h-6 w-6" />
-          Créer une Partie
-        </button>
-      </div>
+      <button
+        ref={buttonRef}
+        onClick={() => setIsExpanded(true)}
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        style={{
+          position: 'fixed',
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+          transform: isDragging ? 'scale(1.1)' : 'none',
+          zIndex: 50,
+          cursor: isDragging ? 'grabbing' : 'grab'
+        }}
+        className={`bg-blue-800 text-white hover:pointer p-4 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 flex items-center justify-center space-x-2 ${
+          isDragging ? 'shadow-2xl' : 'hover:scale-110'
+        }`}
+        title="Créer une partie rapide (glisser pour déplacer)"
+      >
+        <Plus className="h-6 w-6" />
+        <span>Créer une Partie</span>
+      </button>
     )
   }
 
-  // Expanded overlay form
+  // Expanded overlay form (centered, not draggable)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
